@@ -1,0 +1,9 @@
+{
+  "$schema": "../node_modules/@angular-devkit/schematics/collection-schema.json",
+  "schematics": {
+    "test": {
+      "description": "Selective standalone migration",
+      "factory": "./main#dependencyVisualizer"
+    }
+  }
+}

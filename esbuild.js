@@ -1,0 +1,16 @@
+const esbuild = require("esbuild");
+const { nodeExternalsPlugin } = require("esbuild-node-externals");
+esbuild
+  .build({
+    entryPoints: ["./src/main.ts"],
+    outfile: "src/main.js",
+    external: ["@angular/compiler-cli"],
+    bundle: true,
+    minify: false,
+    treeShaking: true,
+    platform: "node",
+    format: "cjs",
+    target: "node20",
+    plugins: [nodeExternalsPlugin()],
+  })
+  .catch(() => process.exit(1));
