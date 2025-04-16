@@ -30,6 +30,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/main.ts
 var main_exports = {};
 __export(main_exports, {
+  context: () => context,
   dependencyVisualizer: () => dependencyVisualizer
 });
 module.exports = __toCommonJS(main_exports);
@@ -318,6 +319,7 @@ var div = (attributes, content) => getTag("div", attributes, content);
 var ul = (attributes, content) => getTag("ul", attributes, content);
 var li = (attributes, content) => getTag("li", attributes, content);
 var a = (attributes, content) => getTag("a", attributes, content);
+var pre = (attributes, content) => getTag("pre", attributes, content);
 var renderComponentListItemEntry = (declaration, ngChecker) => {
   const href = declaration ? `/component/${encodeURIComponent(getGlobalNodeId(declaration))}` : null;
   return a(
@@ -325,18 +327,13 @@ var renderComponentListItemEntry = (declaration, ngChecker) => {
     `- ${declaration.name?.escapedText} (${ngChecker.getOwningNgModule(declaration)?.name?.escapedText})`
   );
 };
-var renderDirectiveListItemEntry = (declaration, ngChecker) => {
-  const owningModule = ngChecker.getOwningNgModule(declaration);
-  const owningModuleName = owningModule ? owningModule.name?.escapedText ?? "missing moudle name" : "standalone";
-  return div(null, `- ${declaration.name?.escapedText} (${owningModuleName})`);
-};
 
 // src/routes/file.ts
 var import_typescript6 = __toESM(require("typescript"));
-var handleFile = (url, _req, res, _server, context) => {
+var handleFile = (url, _req, res, _server, context2) => {
   const fsPathSegment = url.pathname.substring(1);
   const fsPath = url.searchParams.get("path") ?? fsPathSegment;
-  const fsTreeNode = !fsPath ? context.source.tree : getAtPath(context.source.tree, fsPath);
+  const fsTreeNode = !fsPath ? context2.source.tree : getAtPath(context2.source.tree, fsPath);
   const getTreeLink = (fsPathSegment2) => {
     const href = encodeURIComponent(
       [fsPath, fsPathSegment2].filter((_) => _).join("/")
@@ -400,11 +397,11 @@ var handleShutdown = (_url, _req, res, server) => {
 
 // src/routes/file/node.ts
 var import_typescript7 = require("typescript");
-var handleNodeInFile = (_url, _req, res, _server, context) => {
+var handleNodeInFile = (_url, _req, res, _server, context2) => {
   const [_0, _fsPath, _2, nodeId] = _url.pathname.substring(1).split("/");
   const fsPath = decodeURIComponent(_fsPath).substring(1);
   console.log("fsPath", fsPath);
-  const fsTreeNode = getAtPath(context.source.tree, fsPath);
+  const fsTreeNode = getAtPath(context2.source.tree, fsPath);
   if (!(0, import_typescript7.isSourceFile)(fsTreeNode)) {
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("Path does not point to the file.");
@@ -418,7 +415,7 @@ var handleNodeInFile = (_url, _req, res, _server, context) => {
     return;
   }
   const entriesHTML = shallowStringifyToHTML(node);
-  const symbol = context.checker.ts.getSymbolAtLocation(node);
+  const symbol = context2.checker.ts.getSymbolAtLocation(node);
   const symbolHTML = symbol ? shallowStringifyToHTML(symbol) : "";
   res.writeHead(200, { "Content-Type": "text/html" });
   res.end(
@@ -471,28 +468,6 @@ var import_typescript9 = __toESM(require("typescript"));
 var import_typescript8 = __toESM(require("typescript"));
 
 // src/angular-tsc.helpers.ts
-function findImportLocation(target, inComponent, importMode, typeChecker) {
-  const importLocations = typeChecker.getPotentialImportsFor(
-    target,
-    inComponent,
-    importMode
-  );
-  let firstSameFileImport = null;
-  let firstModuleImport = null;
-  for (const location of importLocations) {
-    if (location.kind === 1 /* Standalone */) {
-      return location;
-    }
-    if (!location.moduleSpecifier && !firstSameFileImport) {
-      firstSameFileImport = location;
-    }
-    if (location.kind === 0 /* NgModule */ && !firstModuleImport && // ɵ is used for some internal Angular modules that we want to skip over.
-    !location.symbolName.startsWith("\u0275")) {
-      firstModuleImport = location;
-    }
-  }
-  return firstSameFileImport || firstModuleImport || importLocations[0] || null;
-}
 function findTemplateDependencies(decl, typeChecker) {
   const results = [];
   const usedDirectives = typeChecker.getUsedDirectives(decl);
@@ -514,37 +489,16 @@ function findTemplateDependencies(decl, typeChecker) {
   }
   return results;
 }
-function getComponentImportExpressions(decl, allDeclarations, typeChecker) {
-  const templateDependencies = findTemplateDependencies(decl, typeChecker);
-  const usedDependenciesInMigration = new Set(
-    templateDependencies.filter((dep) => allDeclarations.has(dep.node))
-  );
-  const seenImports = /* @__PURE__ */ new Set();
-  const resolvedDependencies = [];
-  for (const dep of templateDependencies) {
-    const importLocation = findImportLocation(
-      dep,
-      decl,
-      usedDependenciesInMigration.has(dep) ? 1 /* ForceDirect */ : 0 /* Normal */,
-      typeChecker
-    );
-    if (importLocation && !seenImports.has(importLocation.symbolName)) {
-      seenImports.add(importLocation.symbolName);
-      resolvedDependencies.push(importLocation);
-    }
-  }
-  return resolvedDependencies;
-}
 var knownNgElementTypes = Object.values(NgElementType);
 
 // src/routes/component.ts
-var handleComponent = (_url, _req, res, _server, context) => {
+var handleComponent = (_url, _req, res, _server, context2) => {
   const [_0, _globalNodeId] = _url.pathname.substring(1).split("/");
   const globalNodeId = decodeURIComponent(_globalNodeId);
   console.log("globalNodeId", globalNodeId);
   const nodeData = getDataFromGlobalNodeId(globalNodeId);
   const fsTreeNode = getAtPath(
-    context.source.tree,
+    context2.source.tree,
     nodeData.fileName.substring(1)
   );
   if (!isSourceFile(fsTreeNode)) {
@@ -552,55 +506,56 @@ var handleComponent = (_url, _req, res, _server, context) => {
     res.end("Path does not point to the file.");
     return;
   }
-  const component = context.elements.filter((element) => element.type === "Component" /* Component */).find((component2) => getGlobalNodeId(component2.cls) === globalNodeId);
+  const component = context2.elements.filter((element) => element.type === "Component" /* Component */).find((component2) => getGlobalNodeId(component2.cls) === globalNodeId);
   if (!component) {
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("Component not found in file.");
     return;
   }
-  const declaredIn = context.checker.ng.getOwningNgModule(component.cls);
-  const usedDirectives = context.checker.ng.getUsedDirectives(component.cls) ?? [];
-  const meta = context.checker.ng.getDirectiveMetadata(component.cls);
+  const getDirectiveMetadata2 = (cls) => context2.checker.ng.getDirectiveMetadata(cls);
+  const isStandalone = (cls) => getDirectiveMetadata2(cls)?.isStandalone;
+  const getOwningNgModule2 = (cls) => context2.checker.ng.getOwningNgModule(cls);
+  const meta = getDirectiveMetadata2(component.cls);
+  const declaredIn = getOwningNgModule2(component.cls);
+  function findDependencies(cls) {
+    return findTemplateDependencies(cls, context2.checker.ng).map(
+      ({ node }) => ({
+        cls: node,
+        deps: findDependencies(node)
+      })
+    );
+  }
+  function renderDependencies(deps) {
+    return ul(
+      null,
+      deps.map(
+        (dep) => li(
+          { style: `color: ${isStandalone(dep.cls) ? "green" : "inherit"}` },
+          dep.cls.name?.escapedText.toString() + (dep.deps.length === 0 ? "" : renderDependencies(dep.deps))
+        )
+      ).join("")
+    );
+  }
   const title = [
     div(null, `Name: ${component.cls.name?.escapedText}`),
     div(null, `- selector: ${meta?.selector}`),
     div(
       null,
-      `Declared in: ${declaredIn ? declaredIn.name?.escapedText : "standalone"}`
+      `Declared in: ${isStandalone(component.cls) ? "standalone" : declaredIn?.name?.escapedText ?? "unresolved"}`
     )
   ].join("");
   const componentsHTML = [
-    div(null, "Used components:"),
-    ...usedDirectives.filter((directive) => directive.isComponent).map((directive) => {
-      const declaration = directive.ref.node;
-      return renderComponentListItemEntry(
-        declaration,
-        context.checker.ng
-      );
-    }),
-    div(null, "Used directives:"),
-    ...usedDirectives.filter((directive) => !directive.isComponent).map((directive) => {
-      const declaration = directive.ref.node;
-      return renderDirectiveListItemEntry(
-        declaration,
-        context.checker.ng
-      );
-    }),
-    div(null, "Potential imports:"),
-    ...getComponentImportExpressions(
-      component.cls,
-      new Set(context.elements.map((_) => _.cls)),
-      context.checker.ng
-    ).map((potentialImport) => div(null, potentialImport.symbolName)),
+    div(null, "Dependencies:"),
+    renderDependencies(findDependencies(component.cls)),
     a(
       {
         href: `/migrate-single/${encodeURIComponent(getGlobalNodeId(component.cls))}`
       },
       "Make standalone"
     ),
-    div(
+    pre(
       null,
-      context.checker.ng.getTemplate(component.cls)?.map((_) => _.sourceSpan.toString()).join()
+      context2.checker.ng.getTemplate(component.cls)?.map((_) => _.sourceSpan.toString()).join()
     )
   ].join("");
   const html = [title, componentsHTML].join(`<hr>`);
@@ -610,8 +565,8 @@ var handleComponent = (_url, _req, res, _server, context) => {
 
 // src/routes/modules.ts
 var import_typescript11 = __toESM(require("typescript"));
-var handleModules = (_url, _req, res, _server, context) => {
-  const ngModules = context.elements.filter((element) => element.type === "NgModule" /* NgModule */).map((module2) => {
+var handleModules = (_url, _req, res, _server, context2) => {
+  const ngModules = context2.elements.filter((element) => element.type === "NgModule" /* NgModule */).map((module2) => {
     let declarations = [];
     const metadata = module2 && extractMetadataLiteral(module2.decorator.node);
     if (!metadata) return { ...module2, declarations };
@@ -622,7 +577,7 @@ var handleModules = (_url, _req, res, _server, context) => {
       return {
         name: node,
         class: getClassDeclarationForImportedIdentifier(
-          context.checker.ts,
+          context2.checker.ts,
           node
         )
       };
@@ -654,8 +609,8 @@ function hasNgModuleMetadataElements(node) {
 
 // src/routes/tests.ts
 var import_typescript12 = __toESM(require("typescript"));
-var handleTests = (_url, _req, res, _server, context) => {
-  const testFiles = context.source.files.filter((file) => {
+var handleTests = (_url, _req, res, _server, context2) => {
+  const testFiles = context2.source.files.filter((file) => {
     console.log(file.fileName);
     return file.fileName.endsWith("spec.ts");
   });
@@ -1137,32 +1092,20 @@ var import_typescript15 = __toESM(require("typescript"));
 
 // src/routes/migrate-single.ts
 var import_path5 = require("path");
-var handleToStandalone = (_url, _req, res, _server, context) => {
-  const [_0, _globalNodeId] = _url.pathname.substring(1).split("/");
-  const globalNodeId = decodeURIComponent(_globalNodeId);
-  console.log("globalNodeId", globalNodeId);
-  const nodeData = getDataFromGlobalNodeId(globalNodeId);
-  const fsTreeNode = getAtPath(
-    context.source.tree,
-    nodeData.fileName.substring(1)
-  );
-  if (!isSourceFile(fsTreeNode)) {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("Path does not point to the file.");
-    return;
-  }
-  const component = context.elements.filter((element) => element.type === "Component" /* Component */).find((component2) => getGlobalNodeId(component2.cls) === globalNodeId);
-  if (!component) {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("Component not found in file.");
-    return;
-  }
+var handleToStandaloneNew = (_url, _req, res, _server, context2) => {
+  const [_0, _elementId] = _url.pathname.substring(1).split("/");
+  const component = context2.elements.at(Number(_elementId));
   const printer = import_typescript16.default.createPrinter();
-  toStandalone(component.cls, context, printer);
+  if (!component) return;
+  console.log("about to migrate");
+  toStandalone(component.cls, context2, printer);
+  context2.server.shut();
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("Yeehaa");
 };
-function toStandalone(toMigrate, context, printer, fileImportRemapper, declarationImportRemapper) {
-  const { program } = context;
-  const tree = context.schematic.tree;
+function toStandalone(toMigrate, context2, printer, fileImportRemapper, declarationImportRemapper) {
+  const { program } = context2;
+  const tree = context2.schematic.tree;
   const templateTypeChecker = program.compiler.getTemplateTypeChecker();
   const declarations = /* @__PURE__ */ new Set();
   const tracker = new ChangeTracker(printer, fileImportRemapper);
@@ -1191,7 +1134,7 @@ function convertNgModuleDeclarationToStandalone(decl, allDeclarations, tracker, 
   if (directiveMeta && directiveMeta.decorator && !directiveMeta.isStandalone) {
     let decorator = markDecoratorAsStandalone(directiveMeta.decorator);
     if (directiveMeta.isComponent) {
-      const importsToAdd = getComponentImportExpressions2(
+      const importsToAdd = getComponentImportExpressions(
         decl,
         allDeclarations,
         tracker,
@@ -1222,7 +1165,7 @@ function convertNgModuleDeclarationToStandalone(decl, allDeclarations, tracker, 
     }
   }
 }
-function getComponentImportExpressions2(decl, allDeclarations, tracker, typeChecker, importRemapper) {
+function getComponentImportExpressions(decl, allDeclarations, tracker, typeChecker, importRemapper) {
   const templateDependencies = findTemplateDependencies2(decl, typeChecker);
   const usedDependenciesInMigration = new Set(
     templateDependencies.filter((dep) => allDeclarations.has(dep.node))
@@ -1230,7 +1173,7 @@ function getComponentImportExpressions2(decl, allDeclarations, tracker, typeChec
   const seenImports = /* @__PURE__ */ new Set();
   const resolvedDependencies = [];
   for (const dep of templateDependencies) {
-    const importLocation = findImportLocation2(
+    const importLocation = findImportLocation(
       dep,
       decl,
       usedDependenciesInMigration.has(dep) ? 1 : 0,
@@ -1358,7 +1301,7 @@ function setPropertyOnAngularDecorator(node, name, initializer) {
 function isNamedPropertyAssignment(node) {
   return import_typescript16.default.isPropertyAssignment(node) && node.name && import_typescript16.default.isIdentifier(node.name);
 }
-function findImportLocation2(target, inContext, importMode, typeChecker) {
+function findImportLocation(target, inContext, importMode, typeChecker) {
   const importLocations = typeChecker.getPotentialImportsFor(
     target,
     inContext,
@@ -1413,13 +1356,147 @@ function findLiteralProperty2(literal, name) {
   );
 }
 
+// src/routes/api.ts
+var GET_component_list = (_url, _req, res, _server) => {
+  res.writeHead(200, { "Content-Type": "text/json" });
+  res.end(
+    JSON.stringify(
+      context.elements.map((element, id) => ({ ...element, id })).filter((element) => element.type === "Component" /* Component */).map((component) => ({
+        id: component.id,
+        ...getComponent(component.cls)
+      }))
+    )
+  );
+};
+var GET_component = (url, _req, res, _server) => {
+  const [_0, _path, idString] = getPathnameElements(url);
+  const id = Number(idString);
+  const element = context.elements.at(id);
+  if (!element) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("No element of that ID.");
+    return;
+  }
+  if (element.type !== "Component" /* Component */) {
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    res.end(`Element of ID ${id} is not a Component`);
+    return;
+  }
+  res.writeHead(200, { "Content-Type": "text/json" });
+  res.end(JSON.stringify({ id, ...getComponent(element.cls) }));
+};
+var getPipe = (cls) => {
+  const meta = getPipeMetadata(cls);
+  if (!meta) throw Error(`Element of is not a directive`);
+  const owningModule = getOwningNgModule(cls);
+  const declaredIn = owningModule && context.elements.find((element) => element.cls === owningModule);
+  return {
+    type: "Pipe" /* Pipe */,
+    name: meta.name,
+    className: cls.name?.escapedText,
+    standalone: meta.isStandalone,
+    declaredIn
+  };
+};
+var GET_component_dependency_list = (url, _req, res, _server) => {
+  const [_api, _componenet, idString, _dependency] = getPathnameElements(url);
+  const id = Number(idString);
+  const element = context.elements.at(id);
+  if (!element) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("No element of that ID.");
+    return;
+  }
+  if (element.type !== "Component" /* Component */) {
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    res.end(`Element of ID ${id} is not a Component`);
+    return;
+  }
+  const potentialPipes = context.checker.ng.getPotentialPipes(element.cls);
+  res.writeHead(200, { "Content-Type": "text/json" });
+  res.end(
+    JSON.stringify({
+      directives: context.checker.ng.getUsedDirectives(element.cls)?.map(
+        (directive) => getDirective(directive.ref.node)
+      ) ?? [],
+      pipes: context.checker.ng.getUsedPipes(element.cls)?.map((name) => {
+        const pipeUsed = potentialPipes.find(
+          (potentialPipe) => potentialPipe.name === name
+        );
+        if (!pipeUsed) return null;
+        return getPipe(pipeUsed.ref.node);
+      }) ?? []
+    })
+  );
+};
+var GET_component_dependency = (url, _req, res, _server) => {
+  const throwHttp = (code, message) => {
+    res.writeHead(code, { "Content-Type": "text/plain" });
+    res.end(message);
+  };
+  const throwNoElementOfId = (id) => throwHttp(404, `No element with id: ${id}`);
+  const throwElementIsNotOfType = (id, type) => throwHttp(404, `Element of ID ${id} is not a ${type}`);
+  const [_api, _componenetId, idString, _dependency, depIdString] = getPathnameElements(url);
+  const componentId = Number(idString);
+  const depId = Number(depIdString);
+  const component = context.elements.at(componentId);
+  const dep = context.elements.at(depId);
+  if (!component) return throwNoElementOfId(componentId);
+  if (component.type !== "Component" /* Component */)
+    return throwElementIsNotOfType(componentId, "Component");
+  if (!dep) return throwNoElementOfId(depId);
+  const templateDependencyTypes = [
+    "Component" /* Component */,
+    "Directive" /* Directive */,
+    "Pipe" /* Pipe */
+  ];
+  if (templateDependencyTypes.includes(dep.type))
+    return throwElementIsNotOfType(
+      componentId,
+      templateDependencyTypes.join(", ")
+    );
+  res.writeHead(200, { "Content-Type": "text/json" });
+  if (dep.type === "Component" /* Component */ || dep.type === "Directive" /* Directive */) {
+    res.end(JSON.stringify(getDirective(dep.cls)));
+  } else {
+    res.end(JSON.stringify(getPipe(dep.cls)));
+  }
+};
+var getPathnameElements = (url) => {
+  return url.pathname.substring(1).split("/");
+};
+var getDirectiveMetadata = (cls) => context.checker.ng.getDirectiveMetadata(cls);
+var getPipeMetadata = (cls) => context.checker.ng.getPipeMetadata(cls);
+var getOwningNgModule = (cls) => context.checker.ng.getOwningNgModule(cls);
+var getDirective = (cls, opts) => {
+  const meta = getDirectiveMetadata(cls);
+  if (!meta) throw Error(`Element of is not a directive`);
+  const owningModule = getOwningNgModule(cls);
+  const declaredIn = owningModule && context.elements.find((element) => element.cls === owningModule);
+  const directive = {
+    name: cls.name?.escapedText,
+    type: meta.isComponent ? "Component" /* Component */ : "Directive" /* Directive */,
+    selector: meta?.selector,
+    standalone: meta?.isStandalone,
+    declaredIn: declaredIn?.cls.name?.escapedText
+  };
+  console.log(directive);
+  return directive;
+};
+var getComponent = (cls) => {
+  const directive = getDirective(cls);
+  if (directive.type !== "Component" /* Component */)
+    throw Error(`Element of is not a component`);
+  return directive;
+};
+
 // src/routes/components.ts
-var handleComponents = (_url, _req, res, _server, context) => {
-  const components = context.elements.filter(
+var handleComponents = (_url, _req, res, _server, context2) => {
+  const components = context2.elements.filter(
     (element) => element.type === "Component" /* Component */
   );
   const content = components.reduce((acc, component) => {
-    return acc + renderComponentListItemEntry(component.cls, context.checker.ng);
+    return acc + renderComponentListItemEntry(component.cls, context2.checker.ng);
   }, "");
   const css = `
       .block { display: block; }
@@ -1429,22 +1506,31 @@ var handleComponents = (_url, _req, res, _server, context) => {
 };
 
 // src/main.ts
+var context = {
+  program: null,
+  schematic: null,
+  checker: null,
+  elements: null,
+  source: null
+};
 function dependencyVisualizer(_options) {
   return async (tree, _context) => {
     const basePath = process.cwd();
     const { buildPaths } = await getProjectTsConfigPaths(tree);
     const { createProgram } = await import("@angular/compiler-cli");
     for (const tsconfigPath of buildPaths) {
-      analyseDependencies({
+      await analyseDependencies({
         tree,
         basePath,
         tsconfigPath,
         createProgram
       });
     }
+    console.log("im don");
+    return tree;
   };
 }
-function analyseDependencies(data) {
+async function analyseDependencies(data) {
   const { host, options, rootNames } = createProgramOptions(
     data.tree,
     data.tsconfigPath,
@@ -1471,26 +1557,26 @@ function analyseDependencies(data) {
   const elements = sourceFiles.flatMap(
     (file) => findNgClasses(file, tsChecker)
   );
-  const context = {
-    program,
-    schematic: {
-      tree: data.tree
-    },
-    source: {
-      files: sourceFiles,
-      tree: fileTree
-    },
-    checker: {
-      ts: tsChecker,
-      ng: ngChecker
-    },
-    elements
-  };
+  context.program = program;
+  context.schematic = { tree: data.tree };
+  context.source = { files: sourceFiles, tree: fileTree };
+  context.checker = { ts: tsChecker, ng: ngChecker };
+  context.elements = elements;
   const anyPattern = /^.*$/;
   const nodeIdPattern = /^[\w-]*$/;
   const routes = [
     { path: [""], handler: handleFile },
     { path: ["file", anyPattern], handler: handleFile },
+    { path: ["api", "component"], handler: GET_component_list },
+    { path: ["api", "component", anyPattern], handler: GET_component },
+    {
+      path: ["api", "component", anyPattern, "dependency"],
+      handler: GET_component_dependency_list
+    },
+    {
+      path: ["api", "component", anyPattern, "dependency", anyPattern],
+      handler: GET_component_dependency
+    },
     {
       path: ["file", anyPattern, "node", nodeIdPattern],
       handler: handleNodeInFile
@@ -1504,7 +1590,7 @@ function analyseDependencies(data) {
     },
     {
       path: ["migrate-single", anyPattern],
-      handler: handleToStandalone
+      handler: handleToStandaloneNew
     },
     {
       path: ["components"],
@@ -1535,9 +1621,30 @@ function analyseDependencies(data) {
       res.end("Not Found");
     }
   });
+  const createSignal = () => {
+    const promiseObj = { resolve(x) {
+    }, reject() {
+    } };
+    const promise = new Promise((resolve3, reject) => {
+      promiseObj.resolve = () => resolve3();
+      promiseObj.reject = () => reject();
+    });
+    return { ...promiseObj, instance: promise };
+  };
+  const shutdownSignal = createSignal();
+  context.server = {
+    instance: server,
+    shut() {
+      shutdownSignal.resolve(null);
+      console.log("should resolve by now");
+    }
+  };
   server.listen(3e3, () => {
     console.log("Server is listening on http://localhost:3000");
   });
+  await shutdownSignal.instance;
+  console.log("yeehaa");
+  server.close();
 }
 function makeFileTree(sourceFiles) {
   const fileTree = {};
@@ -1584,6 +1691,7 @@ function findNgClasses(sourceFile, typeChecker) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  context,
   dependencyVisualizer
 });
 /**

@@ -1,0 +1,21 @@
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<script src="https://unpkg.com/htmx-ext-client-side-templates@2.0.0/client-side-templates.js"></script>
+<script src="https://unpkg.com/mustache@latest"></script>
+
+<div hx-ext="client-side-templates">
+  <h3>Component list:</h3>
+  <ul
+    hx-get="/api/component"
+    hx-trigger="load"
+    mustache-array-template="component"
+  ></ul>
+
+  <template id="component">
+    {{#data}}
+    <li>
+      <a href="/static/component-ajs.html?id={{id}}">{{name}}</a>
+      {{#standalone}} (standalone) {{/standalone}}
+    </li>
+    {{/data}}
+  </template>
+</div>

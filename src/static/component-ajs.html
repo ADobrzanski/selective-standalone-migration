@@ -1,0 +1,182 @@
+<!doctype html>
+<head>
+  <script src="./my-component.js" type="module"></script>
+  <script
+    defer
+    src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"
+  ></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <style>
+    .node circle {
+      fill: #4287f5;
+      stroke: steelblue;
+      stroke-width: 3px;
+      cursor: pointer;
+    }
+    .node text {
+      font: 12px sans-serif;
+    }
+    .link {
+      fill: none;
+      stroke: #ccc;
+      stroke-width: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div x-data="{ id: searchParam('id') }">
+    <div
+      x-data="{ component: null }"
+      x-init="load(`/api/component/${id}`).to($data, 'component')"
+    >
+      <template x-if="component">
+        <div>
+          <h3 x-template>${component.name}</h3>
+          <template x-if="!component.standalone">
+            <button @click="fetch(`/migrate-single/${id}`)">
+              Make standalone
+            </button>
+          </template>
+          <ul>
+            <li x-template>selector: ${component.selector}</li>
+            <template x-if="component.standalone">
+              <li x-template>standalone: ${component.standalone}</li>
+            </template>
+            <template x-if="component.declaredIn">
+              <li x-template>declared in: ${component.declaredIn}</li>
+            </template>
+          </ul>
+        </div>
+      </template>
+      <template x-if="!component">
+        <div>Loading component...</div>
+      </template>
+    </div>
+
+    <div
+      x-data="{ data: {}, tree: null }"
+      x-init="load(`/api/component/${id}/dependecy`).to($data, 'data').then(_ => $data.tree = createDependencyTree(_.json))"
+    >
+      <details>
+        <summary x-template>
+          Used directives (${data.directives?.length})
+        </summary>
+
+        <ul>
+          <template x-for="d in data.directives">
+            <li>
+              <span x-html="d.name"></span>
+              <template x-if="d.standalone">
+                <span>(standalone)</span>
+              </template>
+              <template x-if="d.declaredIn">
+                <span>(<span x-html="d.declaredIn"></span>)</span>
+              </template>
+            </li>
+          </template>
+        </ul>
+      </details>
+
+      <details>
+        <summary x-template>Used pipes (${data.pipes?.length})</summary>
+        <ul>
+          <template x-for="d in data.pipes">
+            <li>
+              <span x-html="d.name"></span>
+              <template x-if="d.standalone">
+                <span>(standalone)</span>
+              </template>
+              <template x-if="d.declaredIn">
+                <span>(<span x-html="d.declaredIn"></span>)</span>
+              </template>
+            </li>
+          </template>
+        </ul>
+      </details>
+
+      <template x-if="tree">
+        <my-chart :data="JSON.stringify(tree)"></my-chart>
+      </template>
+    </div>
+  </div>
+
+  <script>
+    function searchParam(name) {
+      return new URLSearchParams(document.location.search).get(name);
+    }
+
+    function load(url) {
+      return {
+        to(data, key) {
+          return fetch(url)
+            .then((_) => _.json())
+            .then((json) => {
+              data[key] = json;
+
+              return { data, key, json };
+            });
+        },
+      };
+    }
+
+    // /**
+    //  * @typedef Dependency
+    //  * @type object
+    //  *
+    //  * @property {string} declaredIn
+    //  * @property {string} name
+    //  */
+    //
+    // /**
+    //  * @typedef DependencyTreeNode
+    //  * @type object
+    //  *
+    //  * @property {string} name
+    //  * @property {DependencyTreeNode} children
+    //  */
+    //
+    // /**
+    //  *
+    //  * @param {object} data
+    //  * @param {Dependency[]} data.directives
+    //  * @param {Dependency[]} data.pipes
+    //  */
+    function createDependencyTree(data) {
+      const deps = [...data.directives, ...data.pipes];
+      const byModules = deps.reduce((acc, curr) => {
+        const declaredIn = curr.declaredIn ?? "standalone";
+
+        if (!acc[declaredIn]) acc[declaredIn] = [];
+
+        acc[declaredIn].push(curr);
+
+        return acc;
+      }, {});
+      console.log("bob2");
+      const modules = Object.keys(byModules);
+
+      const nodes = modules.map((module) => ({
+        name: module,
+        children: byModules[module].map((_) => ({
+          name: _.name,
+          children: [],
+        })),
+      }));
+      console.log(nodes);
+
+      return { name: "ROOT", children: nodes };
+    }
+
+    document.addEventListener("alpine:init", () => {
+      Alpine.directive("template", (el, _, { effect, evaluateLater }) => {
+        let evaluate = evaluateLater("`" + el.innerText + "`");
+
+        effect(() => {
+          evaluate((value) => {
+            el.textContent = value;
+          });
+        });
+      });
+    });
+  </script>
+</body>

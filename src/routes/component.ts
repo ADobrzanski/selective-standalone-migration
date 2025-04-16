@@ -6,16 +6,13 @@ import {
 } from "../tsc.helpers";
 import { getAtPath } from "../helpers";
 import { ScriptContext } from "../main";
-import {
-  a,
-  div,
-  getDocument,
-  renderComponentListItemEntry,
-  renderDirectiveListItemEntry,
-} from "../html.helpers";
-import { getComponentImportExpressions } from "../angular-tsc.helpers";
+import { a, div, getDocument, li, pre, ul } from "../html.helpers";
+import { findTemplateDependencies } from "../angular-tsc.helpers";
 import ts from "typescript";
 import { NgElementType } from "../types/ng-element.enum";
+import { ClassDeclaration } from "@angular/compiler-cli/src/ngtsc/reflection";
+
+type Dep = { cls: ts.ClassDeclaration; deps: Dep[] };
 
 export const handleComponent = (
   _url: URL,
@@ -49,58 +46,60 @@ export const handleComponent = (
     return;
   }
 
-  const declaredIn = context.checker.ng.getOwningNgModule(component.cls);
+  // local helpers
+  const getDirectiveMetadata = (cls: ts.ClassDeclaration) =>
+    context.checker.ng.getDirectiveMetadata(cls);
+  const isStandalone = (cls: ts.ClassDeclaration) =>
+    getDirectiveMetadata(cls)?.isStandalone;
+  const getOwningNgModule = (cls: ts.ClassDeclaration) =>
+    context.checker.ng.getOwningNgModule(cls);
 
-  const usedDirectives =
-    context.checker.ng.getUsedDirectives(component.cls) ?? [];
-  // context.checker.ng.getPotentialTemplateDirectives(component.cls) ?? [];
-  // console.log("getTemplate", context.checker.ng.getTemplate(component.cls));
+  const meta = getDirectiveMetadata(component.cls);
+  const declaredIn = getOwningNgModule(component.cls);
 
-  const meta = context.checker.ng.getDirectiveMetadata(component.cls);
+  function findDependencies(cls: ts.ClassDeclaration): Dep[] {
+    return findTemplateDependencies(cls, context.checker.ng).map(
+      ({ node }: { node: ts.ClassDeclaration }) => ({
+        cls: node,
+        deps: findDependencies(node),
+      }),
+    );
+  }
+
+  function renderDependencies(deps: Dep[]): string {
+    return ul(
+      null,
+      deps
+        .map((dep) =>
+          li(
+            { style: `color: ${isStandalone(dep.cls) ? "green" : "inherit"}` },
+            dep.cls.name?.escapedText.toString() +
+              (dep.deps.length === 0 ? "" : renderDependencies(dep.deps)),
+          ),
+        )
+        .join(""),
+    );
+  }
 
   const title = [
     div(null, `Name: ${component.cls.name?.escapedText}`),
     div(null, `- selector: ${meta?.selector}`),
     div(
       null,
-      `Declared in: ${declaredIn ? declaredIn.name?.escapedText : "standalone"}`,
+      `Declared in: ${isStandalone(component.cls) ? "standalone" : (declaredIn?.name?.escapedText ?? "unresolved")}`,
     ),
   ].join("");
 
   const componentsHTML = [
-    div(null, "Used components:"),
-    ...usedDirectives
-      .filter((directive) => directive.isComponent)
-      .map((directive) => {
-        const declaration = directive.ref.node;
-        return renderComponentListItemEntry(
-          declaration as ts.ClassDeclaration,
-          context.checker.ng,
-        );
-      }),
-    div(null, "Used directives:"),
-    ...usedDirectives
-      .filter((directive) => !directive.isComponent)
-      .map((directive) => {
-        const declaration = directive.ref.node;
-        return renderDirectiveListItemEntry(
-          declaration as ts.ClassDeclaration,
-          context.checker.ng,
-        );
-      }),
-    div(null, "Potential imports:"),
-    ...getComponentImportExpressions(
-      component.cls,
-      new Set(context.elements.map((_) => _.cls)),
-      context.checker.ng,
-    ).map((potentialImport) => div(null, potentialImport.symbolName)),
+    div(null, "Dependencies:"),
+    renderDependencies(findDependencies(component.cls)),
     a(
       {
         href: `/migrate-single/${encodeURIComponent(getGlobalNodeId(component.cls))}`,
       },
       "Make standalone",
     ),
-    div(
+    pre(
       null,
       context.checker.ng
         .getTemplate(component.cls)

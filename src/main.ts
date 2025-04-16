@@ -16,9 +16,20 @@ import { handleComponent } from "./routes/component";
 import { handleModules } from "./routes/modules";
 import { handleTests } from "./routes/tests";
 import { handleStatic } from "./routes/static";
-import { handleToStandalone } from "./routes/migrate-single";
+import {
+  handleToStandalone,
+  handleToStandaloneNew,
+} from "./routes/migrate-single";
+
+import {
+  GET_component,
+  GET_component_dependency_list,
+  GET_component_dependency,
+  GET_component_list,
+} from "./routes/api";
 import { Tree } from "@angular-devkit/schematics";
 import { handleComponents } from "./routes/components";
+import { create } from "domain";
 
 export type FsTreeNode = { [pahtSegment: string]: FsTreeNode | ts.SourceFile };
 
@@ -40,7 +51,19 @@ export type ScriptContext = {
     type: NgElementType;
     decorator: NgDecorator;
   }[];
+  server: {
+    instance: http.Server;
+    shut(): void;
+  };
 };
+
+export const context = {
+  program: null,
+  schematic: null,
+  checker: null,
+  elements: null,
+  source: null,
+} as any as ScriptContext;
 
 export function dependencyVisualizer(_options) {
   return async (tree: Tree, _context) => {
@@ -49,18 +72,19 @@ export function dependencyVisualizer(_options) {
     const { createProgram } = await import("@angular/compiler-cli");
 
     for (const tsconfigPath of buildPaths) {
-      analyseDependencies({
+      await analyseDependencies({
         tree,
         basePath,
         tsconfigPath,
         createProgram,
       });
     }
-    // return tree;
+    console.log("im don");
+    return tree;
   };
 }
 
-function analyseDependencies(data) {
+async function analyseDependencies(data) {
   const { host, options, rootNames } = createProgramOptions(
     data.tree,
     data.tsconfigPath,
@@ -95,21 +119,11 @@ function analyseDependencies(data) {
     findNgClasses(file, tsChecker),
   );
 
-  const context: ScriptContext = {
-    program,
-    schematic: {
-      tree: data.tree,
-    },
-    source: {
-      files: sourceFiles,
-      tree: fileTree,
-    },
-    checker: {
-      ts: tsChecker,
-      ng: ngChecker,
-    },
-    elements,
-  };
+  context.program = program;
+  context.schematic = { tree: data.tree };
+  context.source = { files: sourceFiles, tree: fileTree };
+  context.checker = { ts: tsChecker, ng: ngChecker };
+  context.elements = elements;
 
   // GLOBALS end
 
@@ -130,6 +144,16 @@ function analyseDependencies(data) {
   const routes: Route[] = [
     { path: [""], handler: handleFile },
     { path: ["file", anyPattern], handler: handleFile },
+    { path: ["api", "component"], handler: GET_component_list },
+    { path: ["api", "component", anyPattern], handler: GET_component },
+    {
+      path: ["api", "component", anyPattern, "dependency"],
+      handler: GET_component_dependency_list,
+    },
+    {
+      path: ["api", "component", anyPattern, "dependency", anyPattern],
+      handler: GET_component_dependency,
+    },
     {
       path: ["file", anyPattern, "node", nodeIdPattern],
       handler: handleNodeInFile,
@@ -143,7 +167,7 @@ function analyseDependencies(data) {
     },
     {
       path: ["migrate-single", anyPattern],
-      handler: handleToStandalone,
+      handler: handleToStandaloneNew,
     },
     {
       path: ["components"],
@@ -181,9 +205,31 @@ function analyseDependencies(data) {
     }
   });
 
+  const createSignal = () => {
+    const promiseObj = { resolve(x: unknown) {}, reject() {} };
+    const promise = new Promise((resolve, reject) => {
+      promiseObj.resolve = () => resolve();
+      promiseObj.reject = () => reject();
+    });
+    return { ...promiseObj, instance: promise };
+  };
+
+  const shutdownSignal = createSignal();
+  context.server = {
+    instance: server,
+    shut() {
+      shutdownSignal.resolve(null);
+      console.log("should resolve by now");
+    },
+  };
+
   server.listen(3000, () => {
     console.log("Server is listening on http://localhost:3000");
   });
+
+  await shutdownSignal.instance;
+  console.log("yeehaa");
+  server.close();
 }
 
 // local helpers

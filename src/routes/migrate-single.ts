@@ -37,6 +37,28 @@ export type DeclarationImportsRemapper = (
   imports: PotentialImport[],
 ) => PotentialImport[];
 
+export const handleToStandaloneNew = (
+  _url: URL,
+  _req: IncomingMessage,
+  res: ServerResponse<IncomingMessage>,
+  _server: Server,
+  context: ScriptContext,
+) => {
+  const [_0, _elementId] = _url.pathname.substring(1).split("/");
+  const component = context.elements.at(Number(_elementId));
+  const printer = ts.createPrinter();
+
+  if (!component) return;
+
+  console.log("about to migrate");
+  toStandalone(component.cls, context, printer);
+
+  context.server.shut();
+
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("Yeehaa");
+};
+
 export const handleToStandalone = (
   _url: URL,
   _req: IncomingMessage,
@@ -71,6 +93,11 @@ export const handleToStandalone = (
 
   const printer = ts.createPrinter();
   toStandalone(component.cls, context, printer);
+
+  context.server.shut();
+
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("Yeehaa");
 };
 
 /**

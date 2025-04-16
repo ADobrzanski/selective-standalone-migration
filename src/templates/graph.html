@@ -4,7 +4,7 @@
 <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
 <script src="/static/force-graph.js"></script>
 <script type="module">
-  var svg = ForceGraphWithTooltips(
+  var svg = ForceGraph(
     {
       nodes: [
         { id: 1, title: "John" },
@@ -45,16 +45,16 @@
     .attr("class", "tooltip")
     .style("opacity", 0);
 
-  d3.selectAll("circle")
-    .on("mouseover", function (event, d) {
-      console.log("faf");
-      tooltip.transition().duration(200).style("opacity", 0.9);
-      tooltip
-        .html((d) => d.title)
-        .style("left", event.pageX + "px")
-        .style("top", event.pageY - 28 + "px");
-    })
-    .on("mouseout", function (d) {
-      tooltip.transition().duration(500).style("opacity", 0);
-    });
+  // d3.selectAll("circle")
+  //   .on("mouseover", function (event, d) {
+  //     console.log("faf");
+  //     tooltip.transition().duration(200).style("opacity", 0.9);
+  //     tooltip
+  //       .html((d) => d.title)
+  //       .style("left", event.pageX + "px")
+  //       .style("top", event.pageY - 28 + "px");
+  //   })
+  //   .on("mouseout", function (d) {
+  //     tooltip.transition().duration(500).style("opacity", 0);
+  //   });
 </script>
