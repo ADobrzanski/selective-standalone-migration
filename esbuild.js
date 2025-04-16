@@ -1,5 +1,7 @@
 const esbuild = require("esbuild");
 const { nodeExternalsPlugin } = require("esbuild-node-externals");
+// import esbuild from "esbuild";
+// import { nodeExternalsPlugin } from "esbuild-node-externals";
 esbuild
   .build({
     entryPoints: ["./src/main.ts"],
@@ -10,7 +12,7 @@ esbuild
     treeShaking: true,
     platform: "node",
     format: "cjs",
-    target: "node20",
+    target: "esnext",
     plugins: [nodeExternalsPlugin()],
   })
   .catch(() => process.exit(1));

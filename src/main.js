@@ -10,36 +10,27 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 var __copyProps = (to, from, except, desc) => {
-  if ((from && typeof from === "object") || typeof from === "function") {
+  if (from && typeof from === "object" || typeof from === "function") {
     for (let key of __getOwnPropNames(from))
       if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, {
-          get: () => from[key],
-          enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable,
-        });
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
   }
   return to;
 };
-var __toESM = (mod, isNodeMode, target) => (
-  (target = mod != null ? __create(__getProtoOf(mod)) : {}),
-  __copyProps(
-    // If the importer is in node compatibility mode or this is not an ESM
-    // file that has been converted to a CommonJS file using a Babel-
-    // compatible transform (i.e. "__esModule" has not been set), then set
-    // "default" to the CommonJS "module.exports" for node compatibility.
-    isNodeMode || !mod || !mod.__esModule
-      ? __defProp(target, "default", { value: mod, enumerable: true })
-      : target,
-    mod,
-  )
-);
-var __toCommonJS = (mod) =>
-  __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // src/main.ts
 var main_exports = {};
 __export(main_exports, {
-  dependencyVisualizer: () => dependencyVisualizer,
+  dependencyVisualizer: () => dependencyVisualizer
 });
 module.exports = __toCommonJS(main_exports);
 
@@ -51,55 +42,34 @@ var import_typescript2 = __toESM(require("typescript"));
 var path = __toESM(require("path"));
 var import_typescript = __toESM(require("typescript"));
 function parseTsconfigFile(tsconfigPath, basePath) {
-  const { config } = import_typescript.default.readConfigFile(
-    tsconfigPath,
-    import_typescript.default.sys.readFile,
-  );
+  const { config } = import_typescript.default.readConfigFile(tsconfigPath, import_typescript.default.sys.readFile);
   const parseConfigHost = {
-    useCaseSensitiveFileNames:
-      import_typescript.default.sys.useCaseSensitiveFileNames,
+    useCaseSensitiveFileNames: import_typescript.default.sys.useCaseSensitiveFileNames,
     fileExists: import_typescript.default.sys.fileExists,
     readDirectory: import_typescript.default.sys.readDirectory,
-    readFile: import_typescript.default.sys.readFile,
+    readFile: import_typescript.default.sys.readFile
   };
   if (!path.isAbsolute(basePath)) {
     throw Error("Unexpected relative base path has been specified.");
   }
-  return import_typescript.default.parseJsonConfigFileContent(
-    config,
-    parseConfigHost,
-    basePath,
-    {},
-  );
+  return import_typescript.default.parseJsonConfigFileContent(config, parseConfigHost, basePath, {});
 }
 
 // src/utils/typescript/compiler_host.ts
-function createProgramOptions(
-  tree,
-  tsconfigPath,
-  basePath,
-  fakeFileRead,
-  additionalFiles,
-  optionOverrides,
-) {
+function createProgramOptions(tree, tsconfigPath, basePath, fakeFileRead, additionalFiles, optionOverrides) {
   tsconfigPath = (0, import_path.resolve)(basePath, tsconfigPath);
-  const parsed = parseTsconfigFile(
-    tsconfigPath,
-    (0, import_path.dirname)(tsconfigPath),
-  );
-  const options = optionOverrides
-    ? { ...parsed.options, ...optionOverrides }
-    : parsed.options;
+  const parsed = parseTsconfigFile(tsconfigPath, (0, import_path.dirname)(tsconfigPath));
+  const options = optionOverrides ? { ...parsed.options, ...optionOverrides } : parsed.options;
   const host = createMigrationCompilerHost(
     tree,
     options,
     basePath,
-    fakeFileRead,
+    fakeFileRead
   );
   return {
     rootNames: parsed.fileNames.concat(additionalFiles || []),
     options,
-    host,
+    host
   };
 }
 function createMigrationCompilerHost(tree, options, basePath, fakeRead) {
@@ -109,9 +79,7 @@ function createMigrationCompilerHost(tree, options, basePath, fakeRead) {
     const treeRelativePath = (0, import_path.relative)(basePath, fileName);
     let result = fakeRead?.(treeRelativePath);
     if (typeof result !== "string") {
-      result = treeRelativePath.startsWith("..")
-        ? defaultReadFile.call(host, fileName)
-        : tree.read(treeRelativePath)?.toString();
+      result = treeRelativePath.startsWith("..") ? defaultReadFile.call(host, fileName) : tree.read(treeRelativePath)?.toString();
     }
     return typeof result === "string" ? result.replace(/^\uFEFF/, "") : void 0;
   };
@@ -119,9 +87,8 @@ function createMigrationCompilerHost(tree, options, basePath, fakeRead) {
 }
 
 // src/utils/project_tsconfig_paths.ts
-var import_core = import("@angular-devkit/core");
 async function getProjectTsConfigPaths(tree) {
-  const core = await import_core;
+  const core = await import("@angular-devkit/core");
   const buildPaths = /* @__PURE__ */ new Set();
   const testPaths = /* @__PURE__ */ new Set();
   const workspace = await getWorkspace(tree);
@@ -136,16 +103,16 @@ async function getProjectTsConfigPaths(tree) {
           continue;
         }
         if (name === "build") {
-          buildPaths.add((0, core.normalize)(tsConfig));
+          buildPaths.add(core.normalize(tsConfig));
         } else {
-          testPaths.add((0, core.normalize)(tsConfig));
+          testPaths.add(core.normalize(tsConfig));
         }
       }
     }
   }
   return {
     buildPaths: [...buildPaths],
-    testPaths: [...testPaths],
+    testPaths: [...testPaths]
   };
 }
 function* allTargetOptions(target) {
@@ -161,14 +128,15 @@ function* allTargetOptions(target) {
     }
   }
 }
-async function createHost(tree) {
+function createHost(tree) {
   return {
     async readFile(path2) {
       const data = tree.read(path2);
       if (!data) {
         throw new Error("File not found.");
       }
-      return (await import_core).virtualFs.fileBufferToString(data);
+      const core = await import("@angular-devkit/core");
+      return core.virtualFs.fileBufferToString(data);
     },
     async writeFile(path2, data) {
       return tree.overwrite(path2, data);
@@ -178,14 +146,13 @@ async function createHost(tree) {
     },
     async isFile(path2) {
       return tree.exists(path2);
-    },
+    }
   };
 }
 async function getWorkspace(tree) {
-  const host = await createHost(tree);
-  const { workspace } = await (
-    await import_core
-  ).workspaces.readWorkspace("/", host);
+  const core = await import("@angular-devkit/core");
+  const host = createHost(tree);
+  const { workspace } = await core.workspaces.readWorkspace("/", host);
   return workspace;
 }
 
@@ -195,31 +162,19 @@ var import_typescript6 = __toESM(require("typescript"));
 // utils/typescript/imports.ts
 var import_typescript3 = __toESM(require("typescript"));
 function getImportSpecifier(sourceFile, moduleName, specifierName) {
-  return (
-    getImportSpecifiers(sourceFile, moduleName, [specifierName])[0] ?? null
-  );
+  return getImportSpecifiers(sourceFile, moduleName, [specifierName])[0] ?? null;
 }
 function getImportSpecifiers(sourceFile, moduleName, specifierNames) {
   const matches = [];
   for (const node of sourceFile.statements) {
-    if (
-      import_typescript3.default.isImportDeclaration(node) &&
-      import_typescript3.default.isStringLiteral(node.moduleSpecifier)
-    ) {
-      const isMatch =
-        typeof moduleName === "string"
-          ? node.moduleSpecifier.text === moduleName
-          : moduleName.test(node.moduleSpecifier.text);
+    if (import_typescript3.default.isImportDeclaration(node) && import_typescript3.default.isStringLiteral(node.moduleSpecifier)) {
+      const isMatch = typeof moduleName === "string" ? node.moduleSpecifier.text === moduleName : moduleName.test(node.moduleSpecifier.text);
       const namedBindings = node.importClause?.namedBindings;
-      if (
-        isMatch &&
-        namedBindings &&
-        import_typescript3.default.isNamedImports(namedBindings)
-      ) {
+      if (isMatch && namedBindings && import_typescript3.default.isNamedImports(namedBindings)) {
         for (const specifierName of specifierNames) {
           const match = findImportSpecifier(
             namedBindings.elements,
-            specifierName,
+            specifierName
           );
           if (match) {
             matches.push(match);
@@ -233,9 +188,7 @@ function getImportSpecifiers(sourceFile, moduleName, specifierNames) {
 function findImportSpecifier(nodes, specifierName) {
   return nodes.find((element) => {
     const { name, propertyName } = element;
-    return propertyName
-      ? propertyName.text === specifierName
-      : name.text === specifierName;
+    return propertyName ? propertyName.text === specifierName : name.text === specifierName;
   });
 }
 
@@ -246,11 +199,7 @@ var import_typescript5 = __toESM(require("typescript"));
 var import_typescript4 = __toESM(require("typescript"));
 function getImportOfIdentifier(typeChecker, node) {
   const symbol = typeChecker.getSymbolAtLocation(node);
-  if (
-    !symbol ||
-    symbol.declarations === void 0 ||
-    !symbol.declarations.length
-  ) {
+  if (!symbol || symbol.declarations === void 0 || !symbol.declarations.length) {
     return null;
   }
   const decl = symbol.declarations[0];
@@ -265,16 +214,13 @@ function getImportOfIdentifier(typeChecker, node) {
     // Handles aliased imports: e.g. "import {Component as myComp} from ...";
     name: decl.propertyName ? decl.propertyName.text : decl.name.text,
     importModule: importDecl.moduleSpecifier.text,
-    node: importDecl,
+    node: importDecl
   };
 }
 
 // src/utils/typescript/decorators.ts
 function getCallDecoratorImport(typeChecker, decorator) {
-  if (
-    !import_typescript5.default.isCallExpression(decorator.expression) ||
-    !import_typescript5.default.isIdentifier(decorator.expression.expression)
-  ) {
+  if (!import_typescript5.default.isCallExpression(decorator.expression) || !import_typescript5.default.isIdentifier(decorator.expression.expression)) {
     return null;
   }
   const identifier = decorator.expression.expression;
@@ -283,40 +229,36 @@ function getCallDecoratorImport(typeChecker, decorator) {
 
 // src/utils/ng_decorators.ts
 function getAngularDecorators(typeChecker, decorators) {
-  return decorators
-    .map((node) => ({
-      node,
-      importData: getCallDecoratorImport(typeChecker, node),
-    }))
-    .filter(
-      ({ importData }) =>
-        importData && importData.importModule.startsWith("@angular/"),
-    )
-    .map(({ node, importData }) => ({
-      node,
-      name: importData.name,
-      moduleName: importData.importModule,
-      importNode: importData.node,
-    }));
+  return decorators.map((node) => ({
+    node,
+    importData: getCallDecoratorImport(typeChecker, node)
+  })).filter(
+    ({ importData }) => importData && importData.importModule.startsWith("@angular/")
+  ).map(({ node, importData }) => ({
+    node,
+    name: importData.name,
+    moduleName: importData.importModule,
+    importNode: importData.node
+  }));
 }
 
 // src/main.ts
-var import_compiler_cli = import("@angular/compiler-cli");
 function dependencyVisualizer(_options) {
   return async (tree, _context) => {
     const basePath = process.cwd();
     const { buildPaths } = await getProjectTsConfigPaths(tree);
+    const { createProgram } = await import("@angular/compiler-cli");
     for (const tsconfigPath of buildPaths) {
-      await analyseDependencies({
+      analyseDependencies({
         tree,
         basePath,
         tsconfigPath,
-        // createProgram,
+        createProgram
       });
     }
   };
 }
-async function analyseDependencies(data) {
+function analyseDependencies(data) {
   const { host, options, rootNames } = createProgramOptions(
     data.tree,
     data.tsconfigPath,
@@ -328,13 +270,13 @@ async function analyseDependencies(data) {
       compileNonExportedClasses: true,
       // Avoid checking libraries to speed up the migration.
       skipLibCheck: true,
-      skipDefaultLibCheck: true,
-    },
+      skipDefaultLibCheck: true
+    }
   );
-  const program = (0, (await import_compiler_cli).createProgram)({
+  const program = data.createProgram({
     rootNames,
     host,
-    options,
+    options
   });
   const typeChecker = program.getTsProgram().getTypeChecker();
   const sourceFiles = program.getTsProgram().getSourceFiles();
@@ -351,24 +293,19 @@ function findNgModuleClasses(sourceFile, typeChecker) {
   const fileImportsNgModule = getImportSpecifier(
     sourceFile,
     "@angular/core",
-    "NgModule",
+    "NgModule"
   );
   if (fileImportsNgModule) {
     sourceFile.forEachChild(function walk(node) {
       if (import_typescript6.default.isClassDeclaration(node)) {
         const ngModuleDecorator = getAngularDecorators(
           typeChecker,
-          import_typescript6.default.getDecorators(node) || [],
+          import_typescript6.default.getDecorators(node) || []
         ).find((current) => current.name === "NgModule");
-        const metadata = ngModuleDecorator
-          ? extractMetadataLiteral(ngModuleDecorator.node)
-          : null;
+        const metadata = ngModuleDecorator ? extractMetadataLiteral(ngModuleDecorator.node) : null;
         if (metadata) {
           const declarations = findLiteralProperty(metadata, "declarations");
-          if (
-            declarations != null &&
-            hasNgModuleMetadataElements(declarations)
-          ) {
+          if (declarations != null && hasNgModuleMetadataElements(declarations)) {
             modules.push(node);
           }
         }
@@ -379,34 +316,20 @@ function findNgModuleClasses(sourceFile, typeChecker) {
   return modules;
 }
 function extractMetadataLiteral(decorator) {
-  return import_typescript6.default.isCallExpression(decorator.expression) &&
-    decorator.expression.arguments.length === 1 &&
-    import_typescript6.default.isObjectLiteralExpression(
-      decorator.expression.arguments[0],
-    )
-    ? decorator.expression.arguments[0]
-    : null;
+  return import_typescript6.default.isCallExpression(decorator.expression) && decorator.expression.arguments.length === 1 && import_typescript6.default.isObjectLiteralExpression(decorator.expression.arguments[0]) ? decorator.expression.arguments[0] : null;
 }
 function findLiteralProperty(literal, name) {
   return literal.properties.find(
-    (prop) =>
-      prop.name &&
-      import_typescript6.default.isIdentifier(prop.name) &&
-      prop.name.text === name,
+    (prop) => prop.name && import_typescript6.default.isIdentifier(prop.name) && prop.name.text === name
   );
 }
 function hasNgModuleMetadataElements(node) {
-  return (
-    import_typescript6.default.isPropertyAssignment(node) &&
-    (!import_typescript6.default.isArrayLiteralExpression(node.initializer) ||
-      node.initializer.elements.length > 0)
-  );
+  return import_typescript6.default.isPropertyAssignment(node) && (!import_typescript6.default.isArrayLiteralExpression(node.initializer) || node.initializer.elements.length > 0);
 }
 // Annotate the CommonJS export names for ESM import in node:
-0 &&
-  (module.exports = {
-    dependencyVisualizer,
-  });
+0 && (module.exports = {
+  dependencyVisualizer
+});
 /**
  * @license
  * Copyright Google LLC All Rights Reserved.

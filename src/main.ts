@@ -6,20 +6,20 @@ import { getImportSpecifier } from "../utils/typescript/imports";
 import { getAngularDecorators } from "./utils/ng_decorators";
 import { NgtscProgram } from "@angular/compiler-cli";
 // const { createProgram } = import("@angular/compiler-cli");
-import { createProgram } from "@angular/compiler-cli";
+// import { createProgram } from "@angular/compiler-cli";
 
 export function dependencyVisualizer(_options) {
   return async (tree, _context) => {
     const basePath = process.cwd();
     const { buildPaths } = await getProjectTsConfigPaths(tree);
-    // const { createProgram } = await import("@angular/compiler-cli");
+    const { createProgram } = await import("@angular/compiler-cli");
 
     for (const tsconfigPath of buildPaths) {
       analyseDependencies({
         tree,
         basePath,
         tsconfigPath,
-        // createProgram,
+        createProgram,
       });
     }
     // return tree;
@@ -42,7 +42,7 @@ function analyseDependencies(data) {
     },
   );
 
-  const program = createProgram({
+  const program = data.createProgram({
     rootNames,
     host,
     options,

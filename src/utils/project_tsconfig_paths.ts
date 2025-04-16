@@ -5,8 +5,8 @@
  * Use of this source code is governed by an MIT-style license that can be
  * found in the LICENSE file at https://angular.io/license
  */
-
-import { json, normalize, virtualFs, workspaces } from "@angular-devkit/core";
+// normalize, virtualFs, workspaces
+import type { json, workspaces } from "@angular-devkit/core";
 import { Tree } from "@angular-devkit/schematics";
 
 /**
@@ -18,6 +18,7 @@ export async function getProjectTsConfigPaths(
 ): Promise<{ buildPaths: string[]; testPaths: string[] }> {
   // Start with some tsconfig paths that are generally used within CLI projects. Note
   // that we are not interested in IDE-specific tsconfig files (e.g. /tsconfig.json)
+  const core = await import("@angular-devkit/core");
   const buildPaths = new Set<string>();
   const testPaths = new Set<string>();
 
@@ -36,9 +37,9 @@ export async function getProjectTsConfigPaths(
         }
 
         if (name === "build") {
-          buildPaths.add(normalize(tsConfig));
+          buildPaths.add(core.normalize(tsConfig));
         } else {
-          testPaths.add(normalize(tsConfig));
+          testPaths.add(core.normalize(tsConfig));
         }
       }
     }
@@ -77,7 +78,8 @@ function createHost(tree: Tree): workspaces.WorkspaceHost {
         throw new Error("File not found.");
       }
 
-      return virtualFs.fileBufferToString(data);
+      const core = await import("@angular-devkit/core");
+      return core.virtualFs.fileBufferToString(data);
     },
     async writeFile(path: string, data: string): Promise<void> {
       return tree.overwrite(path, data);
@@ -98,8 +100,9 @@ function createHost(tree: Tree): workspaces.WorkspaceHost {
 async function getWorkspace(
   tree: Tree,
 ): Promise<workspaces.WorkspaceDefinition> {
+  const core = await import("@angular-devkit/core");
   const host = createHost(tree);
-  const { workspace } = await workspaces.readWorkspace("/", host);
+  const { workspace } = await core.workspaces.readWorkspace("/", host);
 
   return workspace;
 }

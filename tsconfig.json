@@ -40,12 +40,12 @@
 {
   "include": ["src"],
   "compilerOptions": {
-    "module": "commonjs",
-    "target": "es6",
-    "lib": ["es2018"],
+    "module": "nodenext",
+    "target": "esnext",
+    "lib": ["esnext"],
     "declaration": true,
     "strict": true,
-    "moduleResolution": "node16",
+    "moduleResolution": "node",
     "skipLibCheck": true,
     "esModuleInterop": true,
     "emitDeclarationOnly": true,
