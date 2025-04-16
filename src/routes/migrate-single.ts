@@ -53,6 +53,16 @@ export const handleToStandaloneNew = (
 
   if (!component) return;
 
+  const migrationIssues = findMigrationBlockers({
+    classDeclaration: component.cls,
+    templateTypeChecker: context.checker.ng,
+  });
+  if (migrationIssues) {
+    res.writeHead(409, { "Content-Type": "text/json" });
+    res.end(JSON.stringify(migrationIssues));
+    return;
+  }
+
   console.log("about to migrate");
   toStandalone(component.cls, context, printer);
 
@@ -61,6 +71,72 @@ export const handleToStandaloneNew = (
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("Yeehaa");
 };
+
+function findMigrationBlockers(data: {
+  classDeclaration: ts.ClassDeclaration;
+  templateTypeChecker: TemplateTypeChecker;
+}) {
+  const { classDeclaration, templateTypeChecker } = data;
+
+  const owningModule = templateTypeChecker.getOwningNgModule(classDeclaration)!;
+  const selector =
+    templateTypeChecker.getDirectiveMetadata(classDeclaration)?.selector;
+
+  if (!selector)
+    throw Error(
+      "Cannot check templates for usage if component has no selector.",
+    );
+
+  const sameModuleConsumers = context.elements.filter((potentialConsumer) => {
+    // only components have templates
+    if (potentialConsumer.type !== NgElementType.Component) return false;
+
+    const potentialConsumerOwningModule = templateTypeChecker.getOwningNgModule(
+      potentialConsumer.cls,
+    );
+    // disregard standalone components
+    if (!potentialConsumerOwningModule) return false;
+    // disregard components declared in other modules
+    if (owningModule !== potentialConsumerOwningModule) return false;
+
+    const template = getTemplateOrNull(potentialConsumer.decorator.node);
+    if (!template) return false;
+
+    // check if template includes tag matching component's selector
+    // WARNING: naive method, will not handle complex selectors
+    return getAllXmlTags(template).includes(selector);
+  });
+
+  if (sameModuleConsumers.length === 0) {
+    return null;
+  }
+
+  const sameModuleDependencies =
+    context.elements
+      .find((_) => _.cls === classDeclaration)
+      ?.dependencies()
+      .filter(
+        (_) => templateTypeChecker.getOwningNgModule(_.node) === owningModule,
+      ) ?? [];
+
+  if (sameModuleDependencies.length === 0) {
+    return null;
+  }
+
+  const componentName = classDeclaration.name?.text;
+  const owningModuleName = owningModule.name?.text;
+
+  return {
+    error: "Migration would result in circular dependecy.",
+    details:
+      `${componentName} is currently declared in ${owningModuleName}.` +
+      ` There are ${sameModuleConsumers.length} component(s) declared in that module depending on ${componentName}.` +
+      ` There are also ${sameModuleDependencies.length} dependencies declared in that module ${componentName} uses.` +
+      ` Migrating ${componentName} would result in circular dependecy. Migrate either said consumers or dependencies first to prevent this issue.`,
+    consumers: sameModuleConsumers.map((_) => _.cls.name?.text),
+    dependencies: sameModuleDependencies.map((_) => _.node.name.text),
+  };
+}
 
 export const handleToStandalone = (
   _url: URL,
