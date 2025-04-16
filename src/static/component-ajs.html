@@ -124,17 +124,22 @@
         }
 
         if (d.declaredIn) {
-          d.parentId = d.declaredIn.id;
+          d.parentId = `${root.id}-${d.declaredIn.id}`;
+
+          if (!modules.find((_) => _.id === d.parentId)) {
+            modules.push({
+              ...d.declaredIn,
+              id: d.parentId,
+              parentId: root.id,
+            });
+          }
         } else {
-          if (!modules.find((_) => _.id === standaloneModule.id))
-            modules.push(standaloneModule);
-
           d.parentId = standaloneModule.id;
-        }
 
-        if (!d.declaredIn || modules.find((m) => m.id === d.declaredIn.id))
-          return;
-        modules.push({ ...d.declaredIn, parentId: root.id });
+          if (!modules.find((_) => _.id === standaloneModule.id)) {
+            modules.push(standaloneModule);
+          }
+        }
       });
 
       return [root, ...deps, ...modules];
