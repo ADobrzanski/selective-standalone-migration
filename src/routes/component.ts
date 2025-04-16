@@ -12,6 +12,7 @@ import {
   renderComponentListItemEntry,
   renderDirectiveListItemEntry,
 } from "../html.helpers";
+import { getComponentImportExpressions } from "../angular-tsc.helpers";
 import ts from "typescript";
 import { NgElement } from "../types/ng-element.enum";
 
@@ -80,6 +81,12 @@ export const handleComponent = (
           context.checker.ng,
         );
       }),
+    div(null, "Potential imports:"),
+    ...getComponentImportExpressions(
+      component.cls,
+      new Set(context.elements.map((_) => _.cls)),
+      context.checker.ng,
+    ).map((potentialImport) => div(null, potentialImport.symbolName)),
   ].join("");
 
   const html = [title, componentsHTML].join(`<hr>`);

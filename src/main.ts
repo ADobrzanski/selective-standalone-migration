@@ -15,6 +15,7 @@ import { NgElement } from "./types/ng-element.enum";
 import { handleComponent } from "./routes/component";
 import { handleModules } from "./routes/modules";
 import { handleTests } from "./routes/tests";
+import { handleStatic } from "./routes/static";
 
 export type FsTreeNode = { [pahtSegment: string]: FsTreeNode | ts.SourceFile };
 
@@ -132,6 +133,7 @@ function analyseDependencies(data) {
       handler: handleComponent,
     },
     { path: ["shutdown", anyPattern], handler: handleShutdown },
+    { path: ["static", anyPattern], handler: handleStatic },
   ];
 
   const server = http.createServer((req, res) => {
