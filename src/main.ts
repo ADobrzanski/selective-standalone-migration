@@ -37,6 +37,7 @@ export type FsTreeNode = { [pahtSegment: string]: FsTreeNode | ts.SourceFile };
 
 export type ScriptContext = {
   program: NgtscProgram;
+  basePath: string;
   schematic: {
     tree: Tree;
   };
@@ -62,6 +63,7 @@ export type ScriptContext = {
 
 export const context = {
   program: null,
+  basePath: null,
   schematic: null,
   checker: null,
   elements: null,
@@ -88,6 +90,8 @@ export function dependencyVisualizer(_options) {
 }
 
 async function analyseDependencies(data) {
+  context.basePath = data.basePath;
+
   const { host, options, rootNames } = createProgramOptions(
     data.tree,
     data.tsconfigPath,
