@@ -5,9 +5,8 @@
   "type": "commonjs",
   "schematics": "./src/collection.json",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
+    "dev": "node ./watch.js",
+    "build": "node ./build.js"
   },
   "dependencies": {
     "@angular-devkit/core": "^16.2.14",

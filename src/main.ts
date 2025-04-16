@@ -1,12 +1,39 @@
-// import { Rule, SchematicContext, Tree } from "@angular-devkit/schematics";
 import { createProgramOptions } from "./utils/typescript/compiler_host";
 import { getProjectTsConfigPaths } from "./utils/project_tsconfig_paths";
 import ts from "typescript";
-import { getImportSpecifier } from "../utils/typescript/imports";
-import { getAngularDecorators } from "./utils/ng_decorators";
+import { NgDecorator, getAngularDecorators } from "./utils/ng_decorators";
 import { NgtscProgram } from "@angular/compiler-cli";
-// const { createProgram } = import("@angular/compiler-cli");
-// import { createProgram } from "@angular/compiler-cli";
+import http, { IncomingMessage, ServerResponse } from "http";
+import { extractMetadataLiteral, getImportSpecifier } from "./tsc.helpers";
+import { isNil } from "./ts.helpers";
+import { TemplateTypeChecker } from "@angular/compiler-cli/src/ngtsc/typecheck/api";
+import { handleFile } from "./routes/file";
+import { handleShutdown } from "./routes/shutdown";
+import { handleNodeInFile } from "./routes/file/node";
+import { handleGraph } from "./routes/graph";
+import { NgElement } from "./types/ng-element.enum";
+import { handleComponent } from "./routes/component";
+import { handleModules } from "./routes/modules";
+import { handleTests } from "./routes/tests";
+
+export type FsTreeNode = { [pahtSegment: string]: FsTreeNode | ts.SourceFile };
+
+export type ScriptContext = {
+  program: NgtscProgram;
+  checker: {
+    ts: ts.TypeChecker;
+    ng: TemplateTypeChecker;
+  };
+  source: {
+    tree: FsTreeNode;
+    files: readonly ts.SourceFile[];
+  };
+  elements: {
+    cls: ts.ClassDeclaration;
+    type: NgElement;
+    decorator: NgDecorator;
+  }[];
+};
 
 export function dependencyVisualizer(_options) {
   return async (tree, _context) => {
@@ -42,113 +69,175 @@ function analyseDependencies(data) {
     },
   );
 
-  const program = data.createProgram({
+  const program: NgtscProgram = data.createProgram({
     rootNames,
     host,
     options,
   });
-  const typeChecker = program.getTsProgram().getTypeChecker();
 
-  // crawl all files
+  const tsChecker = program.getTsProgram().getTypeChecker();
+  const ngChecker = program.compiler.getTemplateTypeChecker();
+
   const sourceFiles: readonly ts.SourceFile[] = program
     .getTsProgram()
     .getSourceFiles();
-  for (const sourceFile of sourceFiles) {
-    console.log(findNgModuleClasses(sourceFile, typeChecker));
-  }
 
-  const templateTypeChecker = (
-    program as NgtscProgram
-  ).compiler.getTemplateTypeChecker();
-  const modulesToMigrate = new Set<ts.ClassDeclaration>();
-  const declarations = new Set<ts.ClassDeclaration>();
-  // get components
-  // get all components dependencies
+  const fileTree: FsTreeNode = makeFileTree(sourceFiles);
 
-  console.log(`We did it! ${!!program}`);
+  const elements = sourceFiles.flatMap((file) =>
+    findNgClasses(file, tsChecker),
+  );
+
+  const context: ScriptContext = {
+    program,
+    source: {
+      files: sourceFiles,
+      tree: fileTree,
+    },
+    checker: {
+      ts: tsChecker,
+      ng: ngChecker,
+    },
+    elements,
+  };
+
+  // GLOBALS end
+
+  const anyPattern = /^.*$/;
+  const nodeIdPattern = /^[\w-]*$/;
+
+  type Route = {
+    path: (string | RegExp)[];
+    handler: (
+      url: URL,
+      req: IncomingMessage,
+      res: ServerResponse<IncomingMessage>,
+      server: http.Server,
+      context: ScriptContext,
+    ) => void;
+  };
+
+  const routes: Route[] = [
+    { path: [""], handler: handleFile },
+    { path: ["file", anyPattern], handler: handleFile },
+    {
+      path: ["file", anyPattern, "node", nodeIdPattern],
+      handler: handleNodeInFile,
+    },
+    { path: ["modules"], handler: handleModules },
+    { path: ["tests"], handler: handleTests },
+    { path: ["graph"], handler: handleGraph },
+    {
+      path: ["component", anyPattern],
+      handler: handleComponent,
+    },
+    { path: ["shutdown", anyPattern], handler: handleShutdown },
+  ];
+
+  const server = http.createServer((req, res) => {
+    const url = new URL(`http://localhost:3000${req.url}`);
+    const pathnameSegments = url.pathname.substring(1).split("/");
+
+    const matchingRoute = routes.find((route) => {
+      if (route.path.length !== pathnameSegments.length) return false;
+
+      for (let idx in pathnameSegments) {
+        if (isNil(route.path[idx])) return false;
+
+        if (typeof route.path[idx] === "string") {
+          return route.path[idx] === pathnameSegments[idx];
+        }
+
+        if (route.path[idx] instanceof RegExp) {
+          return pathnameSegments[idx].match(route.path[idx]);
+        }
+      }
+    });
+
+    if (matchingRoute) {
+      matchingRoute.handler(url, req, res, server, context);
+    } else {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("Not Found");
+    }
+  });
+
+  server.listen(3000, () => {
+    console.log("Server is listening on http://localhost:3000");
+  });
 }
+
+// local helpers
+
+function makeFileTree(sourceFiles: readonly ts.SourceFile[]) {
+  const fileTree = {};
+
+  sourceFiles
+    .filter((file) => !file.fileName.includes("node_modules"))
+    .forEach((file) => {
+      const pathSegments = file.fileName.split("/").filter((_) => _);
+      let currentFolder = fileTree;
+
+      pathSegments.forEach((segment) => {
+        // if is file
+        if (segment.includes(".")) {
+          currentFolder[segment] = file;
+        }
+
+        // if is folder and not created yet
+        if (!currentFolder[segment]) {
+          currentFolder[segment] = {};
+        }
+
+        currentFolder = currentFolder[segment];
+      });
+    });
+
+  return fileTree;
+}
+
+const ngElements = Object.values(NgElement) as string[];
 
 /**
  * Finds all modules whose declarations can be migrated.
  **/
-function findNgModuleClasses(
-  sourceFile: ts.SourceFile,
-  typeChecker: ts.TypeChecker,
-) {
-  const modules: ts.ClassDeclaration[] = [];
+function findNgClasses(sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker) {
+  const modules: {
+    cls: ts.ClassDeclaration;
+    decorator: NgDecorator;
+    type: NgElement;
+  }[] = [];
 
-  const fileImportsNgModule = getImportSpecifier(
-    sourceFile,
-    "@angular/core",
-    "NgModule",
+  const fileHasNgElements = ngElements.some((element) =>
+    getImportSpecifier(sourceFile, "@angular/core", element),
   );
 
-  if (fileImportsNgModule) {
-    sourceFile.forEachChild(function walk(node) {
-      if (ts.isClassDeclaration(node)) {
-        const ngModuleDecorator = getAngularDecorators(
-          typeChecker,
-          ts.getDecorators(node) || [],
-        ).find((current) => current.name === "NgModule");
+  if (!fileHasNgElements) return modules;
 
-        // if (ngModuleDecorator) modules.push(node);
-        const metadata = ngModuleDecorator
-          ? extractMetadataLiteral(ngModuleDecorator.node)
-          : null;
+  sourceFile.forEachChild(function walk(node) {
+    analyseClass: if (ts.isClassDeclaration(node)) {
+      const ngDecorator = getAngularDecorators(
+        typeChecker,
+        ts.getDecorators(node) || [],
+      ).find((current) => ngElements.includes(current.name));
 
-        if (metadata) {
-          const declarations = findLiteralProperty(metadata, "declarations");
+      if (!ngDecorator) break analyseClass;
 
-          if (
-            declarations != null &&
-            hasNgModuleMetadataElements(declarations)
-          ) {
-            modules.push(node);
-          }
-        }
-      }
+      const metadata = ngDecorator
+        ? extractMetadataLiteral(ngDecorator.node)
+        : null;
 
-      node.forEachChild(walk);
-    });
-  }
+      if (!metadata) break analyseClass;
+
+      modules.push({
+        cls: node,
+        decorator: ngDecorator,
+        type: ngDecorator.name as NgElement,
+      });
+    }
+
+    node.forEachChild(walk);
+  });
 
   return modules;
-}
-
-/** Extracts the metadata object literal from an Angular decorator. */
-function extractMetadataLiteral(
-  decorator: ts.Decorator,
-): ts.ObjectLiteralExpression | null {
-  // `arguments[0]` is the metadata object literal.
-  return ts.isCallExpression(decorator.expression) &&
-    decorator.expression.arguments.length === 1 &&
-    ts.isObjectLiteralExpression(decorator.expression.arguments[0])
-    ? decorator.expression.arguments[0]
-    : null;
-}
-
-/** Finds a property with a specific name in an object literal expression. */
-function findLiteralProperty(
-  literal: ts.ObjectLiteralExpression,
-  name: string,
-) {
-  return literal.properties.find(
-    (prop) =>
-      prop.name && ts.isIdentifier(prop.name) && prop.name.text === name,
-  );
-}
-
-/**
- * Checks whether a node is an `NgModule` metadata element with at least one element.
- * E.g. `declarations: [Foo]` or `declarations: SOME_VAR` would match this description,
- * but not `declarations: []`.
- */
-function hasNgModuleMetadataElements(
-  node: ts.Node,
-): node is ts.PropertyAssignment & { initializer: ts.ArrayLiteralExpression } {
-  return (
-    ts.isPropertyAssignment(node) &&
-    (!ts.isArrayLiteralExpression(node.initializer) ||
-      node.initializer.elements.length > 0)
-  );
 }

@@ -130,22 +130,22 @@ function* allTargetOptions(target) {
 }
 function createHost(tree) {
   return {
-    async readFile(path2) {
-      const data = tree.read(path2);
+    async readFile(path3) {
+      const data = tree.read(path3);
       if (!data) {
         throw new Error("File not found.");
       }
       const core = await import("@angular-devkit/core");
       return core.virtualFs.fileBufferToString(data);
     },
-    async writeFile(path2, data) {
-      return tree.overwrite(path2, data);
+    async writeFile(path3, data) {
+      return tree.overwrite(path3, data);
     },
-    async isDirectory(path2) {
-      return !tree.exists(path2) && tree.getDir(path2).subfiles.length > 0;
+    async isDirectory(path3) {
+      return !tree.exists(path3) && tree.getDir(path3).subfiles.length > 0;
     },
-    async isFile(path2) {
-      return tree.exists(path2);
+    async isFile(path3) {
+      return tree.exists(path3);
     }
   };
 }
@@ -157,57 +157,24 @@ async function getWorkspace(tree) {
 }
 
 // src/main.ts
-var import_typescript6 = __toESM(require("typescript"));
-
-// utils/typescript/imports.ts
-var import_typescript3 = __toESM(require("typescript"));
-function getImportSpecifier(sourceFile, moduleName, specifierName) {
-  return getImportSpecifiers(sourceFile, moduleName, [specifierName])[0] ?? null;
-}
-function getImportSpecifiers(sourceFile, moduleName, specifierNames) {
-  const matches = [];
-  for (const node of sourceFile.statements) {
-    if (import_typescript3.default.isImportDeclaration(node) && import_typescript3.default.isStringLiteral(node.moduleSpecifier)) {
-      const isMatch = typeof moduleName === "string" ? node.moduleSpecifier.text === moduleName : moduleName.test(node.moduleSpecifier.text);
-      const namedBindings = node.importClause?.namedBindings;
-      if (isMatch && namedBindings && import_typescript3.default.isNamedImports(namedBindings)) {
-        for (const specifierName of specifierNames) {
-          const match = findImportSpecifier(
-            namedBindings.elements,
-            specifierName
-          );
-          if (match) {
-            matches.push(match);
-          }
-        }
-      }
-    }
-  }
-  return matches;
-}
-function findImportSpecifier(nodes, specifierName) {
-  return nodes.find((element) => {
-    const { name, propertyName } = element;
-    return propertyName ? propertyName.text === specifierName : name.text === specifierName;
-  });
-}
+var import_typescript10 = __toESM(require("typescript"));
 
 // src/utils/typescript/decorators.ts
-var import_typescript5 = __toESM(require("typescript"));
+var import_typescript4 = __toESM(require("typescript"));
 
 // src/utils/typescript/imports.ts
-var import_typescript4 = __toESM(require("typescript"));
+var import_typescript3 = __toESM(require("typescript"));
 function getImportOfIdentifier(typeChecker, node) {
   const symbol = typeChecker.getSymbolAtLocation(node);
   if (!symbol || symbol.declarations === void 0 || !symbol.declarations.length) {
     return null;
   }
   const decl = symbol.declarations[0];
-  if (!import_typescript4.default.isImportSpecifier(decl)) {
+  if (!import_typescript3.default.isImportSpecifier(decl)) {
     return null;
   }
   const importDecl = decl.parent.parent.parent;
-  if (!import_typescript4.default.isStringLiteral(importDecl.moduleSpecifier)) {
+  if (!import_typescript3.default.isStringLiteral(importDecl.moduleSpecifier)) {
     return null;
   }
   return {
@@ -220,7 +187,7 @@ function getImportOfIdentifier(typeChecker, node) {
 
 // src/utils/typescript/decorators.ts
 function getCallDecoratorImport(typeChecker, decorator) {
-  if (!import_typescript5.default.isCallExpression(decorator.expression) || !import_typescript5.default.isIdentifier(decorator.expression.expression)) {
+  if (!import_typescript4.default.isCallExpression(decorator.expression) || !import_typescript4.default.isIdentifier(decorator.expression.expression)) {
     return null;
   }
   const identifier = decorator.expression.expression;
@@ -241,6 +208,359 @@ function getAngularDecorators(typeChecker, decorators) {
     importNode: importData.node
   }));
 }
+
+// src/main.ts
+var import_http = __toESM(require("http"));
+
+// src/tsc.helpers.ts
+var import_typescript5 = __toESM(require("typescript"));
+var isSourceFile = (x) => x !== null && typeof x === "object" && "kind" in x && x.kind === import_typescript5.SyntaxKind.SourceFile;
+var getLocalNodeId = (node) => `${node.kind}-${node.pos}-${node.end}`;
+var getGlobalNodeId = (node) => `${node.getSourceFile().fileName}$$${node.kind}$$${node.pos}$$${node.end}`;
+var getDataFromGlobalNodeId = (globalNodeId) => {
+  const [fileName, _kind, _pos, _end] = globalNodeId.split("$$");
+  return {
+    fileName,
+    kind: Number(_kind),
+    pos: Number(_pos),
+    end: Number(_end)
+  };
+};
+var getAllChildren = (node) => {
+  const children = [];
+  node.forEachChild((child) => {
+    children.push(child);
+  });
+  return children;
+};
+var getAllChildrenDeep = (node) => {
+  const children = [];
+  node.forEachChild((child) => {
+    children.push(child, ...getAllChildrenDeep(child));
+  });
+  return children;
+};
+var getClassDeclarationForImportedIdentifier = (typeChecker, node) => {
+  const localSymbol = typeChecker.getSymbolAtLocation(node);
+  const importSpecifier = localSymbol?.getDeclarations()?.find(import_typescript5.default.isImportSpecifier);
+  const importSpecifierNameSymbol = importSpecifier?.name && typeChecker.getSymbolAtLocation(importSpecifier?.name);
+  const importSpecifierNameAliasedSymbol = importSpecifierNameSymbol && typeChecker.getAliasedSymbol(importSpecifierNameSymbol);
+  const importSpecifierNameAliasedSymbolDeclarations = importSpecifierNameAliasedSymbol && importSpecifierNameAliasedSymbol.getDeclarations();
+  return importSpecifierNameAliasedSymbolDeclarations?.find(
+    import_typescript5.default.isClassDeclaration
+  );
+};
+function getImportSpecifier(sourceFile, moduleName, specifierName) {
+  return getImportSpecifiers(sourceFile, moduleName, [specifierName])[0] ?? null;
+}
+function getImportSpecifiers(sourceFile, moduleName, specifierNames) {
+  const matches = [];
+  for (const node of sourceFile.statements) {
+    if (import_typescript5.default.isImportDeclaration(node) && import_typescript5.default.isStringLiteral(node.moduleSpecifier)) {
+      const isMatch = typeof moduleName === "string" ? node.moduleSpecifier.text === moduleName : moduleName.test(node.moduleSpecifier.text);
+      const namedBindings = node.importClause?.namedBindings;
+      if (isMatch && namedBindings && import_typescript5.default.isNamedImports(namedBindings)) {
+        for (const specifierName of specifierNames) {
+          const match = findImportSpecifier(
+            namedBindings.elements,
+            specifierName
+          );
+          if (match) {
+            matches.push(match);
+          }
+        }
+      }
+    }
+  }
+  return matches;
+}
+function findImportSpecifier(nodes, specifierName) {
+  return nodes.find((element) => {
+    const { name, propertyName } = element;
+    return propertyName ? propertyName.text === specifierName : name.text === specifierName;
+  });
+}
+function extractMetadataLiteral(decorator) {
+  return import_typescript5.default.isCallExpression(decorator.expression) && decorator.expression.arguments.length === 1 && import_typescript5.default.isObjectLiteralExpression(decorator.expression.arguments[0]) ? decorator.expression.arguments[0] : null;
+}
+
+// src/ts.helpers.ts
+function isNil(x) {
+  return x === null || x === void 0;
+}
+var isObject = (x) => {
+  return x !== null && typeof x === "object";
+};
+
+// src/helpers.ts
+function getAtPath(obj, path3) {
+  let currentRoot = obj;
+  const pathSegments = path3.split("/");
+  for (let segment of pathSegments) {
+    if (segment in currentRoot) {
+      currentRoot = currentRoot[segment];
+    } else {
+      currentRoot = void 0;
+      break;
+    }
+  }
+  return currentRoot;
+}
+
+// src/html.helpers.ts
+var getDocument = (body, css, script) => `<!DOCTYPE html><html><head><style>${css ?? ""}</style> <script src="https://unpkg.com/htmx.org@2.0.1">${script ?? ""}</script></head><body>${body}</body></html>`;
+var getLink = (data) => `<a href="${data.href}">${data.label}</a>`;
+var getTag = (name, attributes, content) => {
+  const attributeString = Object.entries(attributes ?? {}).filter(([_key, value]) => !isNil(value)).map(([key, value]) => `${key}="${value}"`).join(" ");
+  return `<${name} ${attributeString}>${content ?? ""}</${name}>`;
+};
+var div = (attributes, content) => getTag("div", attributes, content);
+var ul = (attributes, content) => getTag("ul", attributes, content);
+var li = (attributes, content) => getTag("li", attributes, content);
+var a = (attributes, content) => getTag("a", attributes, content);
+var renderComponentListItemEntry = (declaration, ngChecker) => {
+  const href = declaration ? `/component/${encodeURIComponent(getGlobalNodeId(declaration))}` : null;
+  return a(
+    { href, style: "display: block;" },
+    `- ${declaration.name?.escapedText} (${ngChecker.getOwningNgModule(declaration)?.name?.escapedText})`
+  );
+};
+
+// src/routes/file.ts
+var import_typescript6 = __toESM(require("typescript"));
+var handleFile = (url, _req, res, _server, context) => {
+  const fsPathSegment = url.pathname.substring(1);
+  const fsPath = url.searchParams.get("path") ?? fsPathSegment;
+  const fsTreeNode = !fsPath ? context.source.tree : getAtPath(context.source.tree, fsPath);
+  const getTreeLink = (fsPathSegment2) => {
+    const href = encodeURIComponent(
+      [fsPath, fsPathSegment2].filter((_) => _).join("/")
+    );
+    const label = fsPathSegment2;
+    return getLink({ href: `?path=${href}`, label }) + "<br>";
+  };
+  const html = isSourceFile(fsTreeNode) ? renderFile(fsTreeNode) : Object.entries(fsTreeNode).map(
+    ([fsPathSegment2]) => getTreeLink(fsPathSegment2)
+  );
+  res.writeHead(200, { "Content-Type": "text/html" });
+  res.end(`
+          <!DOCTYPE html>
+          <html>
+          <body>
+            ${html}
+          </body>
+          </html>
+        `);
+};
+var renderFile = (tsFile) => {
+  const css = `
+      .columns {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+      }
+
+      .node {
+        margin-left: 8px;
+      }
+    `;
+  const content = `
+      <div class="columns">
+        <pre class="scroll">${tsFile.text}</pre>
+        <div class="scroll">${getAllChildren(tsFile).map(renderNode).join("")}</div>
+        <pre id="node" class="scroll"></pre>
+      </div>
+    `;
+  return getDocument(content, css);
+};
+var renderNode = (node) => {
+  const filePath = encodeURIComponent(node.getSourceFile().fileName);
+  return `
+      <div class="node">
+        <div hx-get="file/${filePath}/node/${getLocalNodeId(node)}" hx-target="#node">${import_typescript6.default.SyntaxKind[node.kind]}</div>
+        ${getAllChildren(node).map(renderNode).join("")}
+      </div>
+    `;
+};
+
+// src/routes/shutdown.ts
+var handleShutdown = (_url, _req, res, server) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("Server is shutting down...");
+  setTimeout(() => {
+    server.close(() => {
+      console.log("Server has been shut down.");
+    });
+  }, 100);
+};
+
+// src/routes/file/node.ts
+var import_typescript7 = require("typescript");
+var handleNodeInFile = (_url, _req, res, _server, context) => {
+  const [_0, _fsPath, _2, nodeId] = _url.pathname.substring(1).split("/");
+  const fsPath = decodeURIComponent(_fsPath).substring(1);
+  console.log("fsPath", fsPath);
+  const fsTreeNode = getAtPath(context.source.tree, fsPath);
+  if (!(0, import_typescript7.isSourceFile)(fsTreeNode)) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("Path does not point to the file.");
+    return;
+  }
+  const children = getAllChildrenDeep(fsTreeNode);
+  const node = children.find((_node) => getLocalNodeId(_node) === nodeId);
+  if (!node) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end(`There is no node with id = ${nodeId} in ${fsPath}.`);
+    return;
+  }
+  const entriesHTML = shallowStringifyToHTML(node);
+  const symbol = context.checker.ts.getSymbolAtLocation(node);
+  const symbolHTML = symbol ? shallowStringifyToHTML(symbol) : "";
+  res.writeHead(200, { "Content-Type": "text/html" });
+  res.end(
+    [entriesHTML, getTag("div", void 0, "Symbol: ------"), symbolHTML].join(
+      ""
+    )
+  );
+};
+var shallowStringifyToHTML = (x) => {
+  const entries = Object.entries(x);
+  return entries.reduce((acc, [key, value]) => {
+    const valueString = isObject(value) ? value["constructor"]["name"] : key === "kind" && typeof value === "number" ? import_typescript7.SyntaxKind[value] : value + "";
+    return acc + `<div>${key}: ${valueString}</div>`;
+  }, "");
+};
+
+// src/routes/graph.ts
+var import_path2 = __toESM(require("path"));
+var import_fs = __toESM(require("fs"));
+var handleGraph = (_url, _req, res) => {
+  const filePath = import_path2.default.join(__dirname, "templates/graph.html");
+  import_fs.default.readFile(filePath, "utf8", (err, data) => {
+    if (err) {
+      console.log(err);
+      res.writeHead(500, { "Content-Type": "text/plain" });
+      res.end("Cannot load template file");
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end(data);
+  });
+};
+
+// src/types/ng-element.enum.ts
+var NgElement = /* @__PURE__ */ ((NgElement2) => {
+  NgElement2["Directive"] = "Directive";
+  NgElement2["Component"] = "Component";
+  NgElement2["NgModule"] = "NgModule";
+  NgElement2["Pipe"] = "Pipe";
+  return NgElement2;
+})(NgElement || {});
+
+// src/routes/component.ts
+var handleComponent = (_url, _req, res, _server, context) => {
+  const [_0, _globalNodeId] = _url.pathname.substring(1).split("/");
+  const globalNodeId = decodeURIComponent(_globalNodeId);
+  console.log("globalNodeId", globalNodeId);
+  const nodeData = getDataFromGlobalNodeId(globalNodeId);
+  const fsTreeNode = getAtPath(
+    context.source.tree,
+    nodeData.fileName.substring(1)
+  );
+  if (!isSourceFile(fsTreeNode)) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("Path does not point to the file.");
+    return;
+  }
+  const component = context.elements.filter((element) => element.type === "Component" /* Component */).find((component2) => getGlobalNodeId(component2.cls) === globalNodeId);
+  if (!component) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("Component not found in file.");
+    return;
+  }
+  const declaredIn = context.checker.ng.getOwningNgModule(component.cls);
+  const usedDirectives = context.checker.ng.getUsedDirectives(component.cls) ?? [];
+  const nameTag = div(null, `Name: ${component.cls.name?.escapedText}`);
+  const declaredInTag = div(
+    null,
+    `Declared in: ${declaredIn ? declaredIn.name?.escapedText : "standalone"}`
+  );
+  const title = nameTag + declaredInTag;
+  const componentsHTML = [
+    div(null, "Used components:"),
+    ...usedDirectives.filter((directive) => directive.isComponent).map((directive) => {
+      const declaration = directive.ref.node;
+      return renderComponentListItemEntry(
+        declaration,
+        context.checker.ng
+      );
+    })
+  ].join("");
+  const html = [title, componentsHTML].join(`<hr>`);
+  res.writeHead(200, { "Content-Type": "text/html" });
+  res.end(getDocument(html));
+};
+
+// src/routes/modules.ts
+var import_typescript8 = __toESM(require("typescript"));
+var handleModules = (_url, _req, res, _server, context) => {
+  const ngModules = context.elements.filter((element) => element.type === "NgModule" /* NgModule */).map((module2) => {
+    let declarations = [];
+    const metadata = module2 && extractMetadataLiteral(module2.decorator.node);
+    if (!metadata) return { ...module2, declarations };
+    const declarationsNode = findLiteralProperty(metadata, "declarations");
+    if (!declarationsNode || !hasNgModuleMetadataElements(declarationsNode))
+      return { ...module2, declarations };
+    declarations = getAllChildren(declarationsNode.initializer).filter((node) => import_typescript8.default.isIdentifier(node)).map((node) => {
+      return {
+        name: node,
+        class: getClassDeclarationForImportedIdentifier(
+          context.checker.ts,
+          node
+        )
+      };
+    });
+    return { ...module2, declarations };
+  });
+  const content = ngModules.reduce((acc, ngModule) => {
+    const moduleId = getGlobalNodeId(ngModule.cls);
+    const name = a(
+      { href: `/module/${encodeURIComponent(moduleId)}` },
+      ngModule.cls.name?.text ?? "NgModule (name unresolvable)"
+    );
+    const declarations = ngModule.declarations.filter((declaration) => declaration.class).map(
+      (declaration) => declaration.class && renderComponentListItemEntry(declaration.class, context.checker.ng)
+    ).join("");
+    return acc + name + declarations;
+  }, "");
+  const css = `
+      .block { display: block; }
+    `;
+  res.writeHead(200, { "Content-Type": "text/html" });
+  res.end(getDocument(content, css));
+};
+function findLiteralProperty(literal, name) {
+  return literal.properties.find(
+    (prop) => prop.name && import_typescript8.default.isIdentifier(prop.name) && prop.name.text === name
+  );
+}
+function hasNgModuleMetadataElements(node) {
+  return import_typescript8.default.isPropertyAssignment(node) && (!import_typescript8.default.isArrayLiteralExpression(node.initializer) || node.initializer.elements.length > 0);
+}
+
+// src/routes/tests.ts
+var import_typescript9 = __toESM(require("typescript"));
+var handleTests = (_url, _req, res, _server, context) => {
+  const testFiles = context.source.files.filter((file) => {
+    console.log(file.fileName);
+    return file.fileName.endsWith("spec.ts");
+  });
+  const content = ul(
+    null,
+    testFiles.map((file) => li(null, file.fileName)).join("")
+  );
+  res.writeHead(200, { "Content-Type": "text/html" });
+  res.end(getDocument(content));
+};
 
 // src/main.ts
 function dependencyVisualizer(_options) {
@@ -278,53 +598,111 @@ function analyseDependencies(data) {
     host,
     options
   });
-  const typeChecker = program.getTsProgram().getTypeChecker();
+  const tsChecker = program.getTsProgram().getTypeChecker();
+  const ngChecker = program.compiler.getTemplateTypeChecker();
   const sourceFiles = program.getTsProgram().getSourceFiles();
-  for (const sourceFile of sourceFiles) {
-    console.log(findNgModuleClasses(sourceFile, typeChecker));
-  }
-  const templateTypeChecker = program.compiler.getTemplateTypeChecker();
-  const modulesToMigrate = /* @__PURE__ */ new Set();
-  const declarations = /* @__PURE__ */ new Set();
-  console.log(`We did it! ${!!program}`);
-}
-function findNgModuleClasses(sourceFile, typeChecker) {
-  const modules = [];
-  const fileImportsNgModule = getImportSpecifier(
-    sourceFile,
-    "@angular/core",
-    "NgModule"
+  const fileTree = makeFileTree(sourceFiles);
+  const elements = sourceFiles.flatMap(
+    (file) => findNgClasses(file, tsChecker)
   );
-  if (fileImportsNgModule) {
-    sourceFile.forEachChild(function walk(node) {
-      if (import_typescript6.default.isClassDeclaration(node)) {
-        const ngModuleDecorator = getAngularDecorators(
-          typeChecker,
-          import_typescript6.default.getDecorators(node) || []
-        ).find((current) => current.name === "NgModule");
-        const metadata = ngModuleDecorator ? extractMetadataLiteral(ngModuleDecorator.node) : null;
-        if (metadata) {
-          const declarations = findLiteralProperty(metadata, "declarations");
-          if (declarations != null && hasNgModuleMetadataElements(declarations)) {
-            modules.push(node);
-          }
+  const context = {
+    program,
+    source: {
+      files: sourceFiles,
+      tree: fileTree
+    },
+    checker: {
+      ts: tsChecker,
+      ng: ngChecker
+    },
+    elements
+  };
+  const anyPattern = /^.*$/;
+  const nodeIdPattern = /^[\w-]*$/;
+  const routes = [
+    { path: [""], handler: handleFile },
+    { path: ["file", anyPattern], handler: handleFile },
+    {
+      path: ["file", anyPattern, "node", nodeIdPattern],
+      handler: handleNodeInFile
+    },
+    { path: ["modules"], handler: handleModules },
+    { path: ["tests"], handler: handleTests },
+    { path: ["graph"], handler: handleGraph },
+    {
+      path: ["component", anyPattern],
+      handler: handleComponent
+    },
+    { path: ["shutdown", anyPattern], handler: handleShutdown }
+  ];
+  const server = import_http.default.createServer((req, res) => {
+    const url = new URL(`http://localhost:3000${req.url}`);
+    const pathnameSegments = url.pathname.substring(1).split("/");
+    const matchingRoute = routes.find((route) => {
+      if (route.path.length !== pathnameSegments.length) return false;
+      for (let idx in pathnameSegments) {
+        if (isNil(route.path[idx])) return false;
+        if (typeof route.path[idx] === "string") {
+          return route.path[idx] === pathnameSegments[idx];
+        }
+        if (route.path[idx] instanceof RegExp) {
+          return pathnameSegments[idx].match(route.path[idx]);
         }
       }
-      node.forEachChild(walk);
     });
-  }
-  return modules;
+    if (matchingRoute) {
+      matchingRoute.handler(url, req, res, server, context);
+    } else {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("Not Found");
+    }
+  });
+  server.listen(3e3, () => {
+    console.log("Server is listening on http://localhost:3000");
+  });
 }
-function extractMetadataLiteral(decorator) {
-  return import_typescript6.default.isCallExpression(decorator.expression) && decorator.expression.arguments.length === 1 && import_typescript6.default.isObjectLiteralExpression(decorator.expression.arguments[0]) ? decorator.expression.arguments[0] : null;
+function makeFileTree(sourceFiles) {
+  const fileTree = {};
+  sourceFiles.filter((file) => !file.fileName.includes("node_modules")).forEach((file) => {
+    const pathSegments = file.fileName.split("/").filter((_) => _);
+    let currentFolder = fileTree;
+    pathSegments.forEach((segment) => {
+      if (segment.includes(".")) {
+        currentFolder[segment] = file;
+      }
+      if (!currentFolder[segment]) {
+        currentFolder[segment] = {};
+      }
+      currentFolder = currentFolder[segment];
+    });
+  });
+  return fileTree;
 }
-function findLiteralProperty(literal, name) {
-  return literal.properties.find(
-    (prop) => prop.name && import_typescript6.default.isIdentifier(prop.name) && prop.name.text === name
+var ngElements = Object.values(NgElement);
+function findNgClasses(sourceFile, typeChecker) {
+  const modules = [];
+  const fileHasNgElements = ngElements.some(
+    (element) => getImportSpecifier(sourceFile, "@angular/core", element)
   );
-}
-function hasNgModuleMetadataElements(node) {
-  return import_typescript6.default.isPropertyAssignment(node) && (!import_typescript6.default.isArrayLiteralExpression(node.initializer) || node.initializer.elements.length > 0);
+  if (!fileHasNgElements) return modules;
+  sourceFile.forEachChild(function walk(node) {
+    analyseClass: if (import_typescript10.default.isClassDeclaration(node)) {
+      const ngDecorator = getAngularDecorators(
+        typeChecker,
+        import_typescript10.default.getDecorators(node) || []
+      ).find((current) => ngElements.includes(current.name));
+      if (!ngDecorator) break analyseClass;
+      const metadata = ngDecorator ? extractMetadataLiteral(ngDecorator.node) : null;
+      if (!metadata) break analyseClass;
+      modules.push({
+        cls: node,
+        decorator: ngDecorator,
+        type: ngDecorator.name
+      });
+    }
+    node.forEachChild(walk);
+  });
+  return modules;
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
