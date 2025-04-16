@@ -3,8 +3,9 @@ const { nodeExternalsPlugin } = require("esbuild-node-externals");
 
 esbuild
   .build({
-    entryPoints: ["./src/main.ts"],
-    outfile: "src/main.js",
+    entryPoints: ["./src/main.ts", "./src/migrate-single.ts"],
+    // outfile: "src/main.js",
+    outdir: "src/",
     external: ["@angular/compiler-cli"],
     bundle: true,
     minify: false,

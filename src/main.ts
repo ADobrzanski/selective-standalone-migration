@@ -11,16 +11,22 @@ import { handleFile } from "./routes/file";
 import { handleShutdown } from "./routes/shutdown";
 import { handleNodeInFile } from "./routes/file/node";
 import { handleGraph } from "./routes/graph";
-import { NgElement } from "./types/ng-element.enum";
+import { NgElementType } from "./types/ng-element.enum";
 import { handleComponent } from "./routes/component";
 import { handleModules } from "./routes/modules";
 import { handleTests } from "./routes/tests";
 import { handleStatic } from "./routes/static";
+import { handleToStandalone } from "./routes/migrate-single";
+import { Tree } from "@angular-devkit/schematics";
+import { handleComponents } from "./routes/components";
 
 export type FsTreeNode = { [pahtSegment: string]: FsTreeNode | ts.SourceFile };
 
 export type ScriptContext = {
   program: NgtscProgram;
+  schematic: {
+    tree: Tree;
+  };
   checker: {
     ts: ts.TypeChecker;
     ng: TemplateTypeChecker;
@@ -31,13 +37,13 @@ export type ScriptContext = {
   };
   elements: {
     cls: ts.ClassDeclaration;
-    type: NgElement;
+    type: NgElementType;
     decorator: NgDecorator;
   }[];
 };
 
 export function dependencyVisualizer(_options) {
-  return async (tree, _context) => {
+  return async (tree: Tree, _context) => {
     const basePath = process.cwd();
     const { buildPaths } = await getProjectTsConfigPaths(tree);
     const { createProgram } = await import("@angular/compiler-cli");
@@ -91,6 +97,9 @@ function analyseDependencies(data) {
 
   const context: ScriptContext = {
     program,
+    schematic: {
+      tree: data.tree,
+    },
     source: {
       files: sourceFiles,
       tree: fileTree,
@@ -131,6 +140,14 @@ function analyseDependencies(data) {
     {
       path: ["component", anyPattern],
       handler: handleComponent,
+    },
+    {
+      path: ["migrate-single", anyPattern],
+      handler: handleToStandalone,
+    },
+    {
+      path: ["components"],
+      handler: handleComponents,
     },
     { path: ["shutdown", anyPattern], handler: handleShutdown },
     { path: ["static", anyPattern], handler: handleStatic },
@@ -198,7 +215,7 @@ function makeFileTree(sourceFiles: readonly ts.SourceFile[]) {
   return fileTree;
 }
 
-const ngElements = Object.values(NgElement) as string[];
+const ngElements = Object.values(NgElementType) as string[];
 
 /**
  * Finds all modules whose declarations can be migrated.
@@ -207,7 +224,7 @@ function findNgClasses(sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker) {
   const modules: {
     cls: ts.ClassDeclaration;
     decorator: NgDecorator;
-    type: NgElement;
+    type: NgElementType;
   }[] = [];
 
   const fileHasNgElements = ngElements.some((element) =>
@@ -234,7 +251,7 @@ function findNgClasses(sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker) {
       modules.push({
         cls: node,
         decorator: ngDecorator,
-        type: ngDecorator.name as NgElement,
+        type: ngDecorator.name as NgElementType,
       });
     }
 

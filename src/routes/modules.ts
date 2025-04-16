@@ -7,7 +7,7 @@ import {
   getGlobalNodeId,
 } from "../tsc.helpers";
 import { ScriptContext } from "../main";
-import { NgElement } from "../types/ng-element.enum";
+import { NgElementType } from "../types/ng-element.enum";
 import ts from "typescript";
 
 type NgModuleDeclarationEntry = {
@@ -23,7 +23,7 @@ export const handleModules = (
   context: ScriptContext,
 ) => {
   const ngModules = context.elements
-    .filter((element) => element.type === NgElement.NgModule)
+    .filter((element) => element.type === NgElementType.NgModule)
     .map((module) => {
       let declarations: NgModuleDeclarationEntry[] = [];
       const metadata = module && extractMetadataLiteral(module.decorator.node);
@@ -51,19 +51,19 @@ export const handleModules = (
   const content = ngModules.reduce((acc, ngModule) => {
     const moduleId = getGlobalNodeId(ngModule.cls);
     const name = a(
-      { href: `/module/${encodeURIComponent(moduleId)}` },
+      { href: `/module/${encodeURIComponent(moduleId)}`, class: "block" },
       ngModule.cls.name?.text ?? "NgModule (name unresolvable)",
     );
-    const declarations = ngModule.declarations
-      .filter((declaration) => declaration.class)
-      .map(
-        (declaration) =>
-          declaration.class &&
-          renderComponentListItemEntry(declaration.class, context.checker.ng),
-      )
-      .join("");
+    // const declarations = ngModule.declarations
+    //   .filter((declaration) => declaration.class)
+    //   .map(
+    //     (declaration) =>
+    //       declaration.class &&
+    //       renderComponentListItemEntry(declaration.class, context.checker.ng),
+    //   )
+    //   .join("");
 
-    return acc + name + declarations;
+    return acc + name;
   }, "");
 
   const css = `

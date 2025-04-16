@@ -1,6 +1,10 @@
 import { Reference } from "@angular/compiler-cli/src/ngtsc/imports";
 import { TemplateTypeChecker } from "@angular/compiler-cli/src/ngtsc/typecheck/api/checker";
 import ts from "typescript";
+import { NgElementType } from "./types/ng-element.enum";
+import { NgClass } from "./types/ng-class.type";
+import { extractMetadataLiteral, getImportSpecifier } from "./tsc.helpers";
+import { getAngularDecorators } from "../utils/ng_decorators";
 
 /** Utility to type a class declaration with a name. */
 export type NamedClassDeclaration = ts.ClassDeclaration & {
@@ -157,4 +161,46 @@ export function getComponentImportExpressions(
 
   return resolvedDependencies;
   // return potentialImportsToExpressions(resolvedDependencies, decl, tracker, importRemapper);
+}
+
+const knownNgElementTypes = Object.values(NgElementType) as string[];
+
+/**
+ * Finds all classes decorated with any of the angular decorators.
+ **/
+export function findNgClasses(
+  sourceFile: ts.SourceFile,
+  typeChecker: ts.TypeChecker,
+): NgClass[] {
+  const ngClasses: NgClass[] = [];
+
+  const fileHasNgElements = knownNgElementTypes.some((element) =>
+    getImportSpecifier(sourceFile, "@angular/core", element),
+  );
+
+  if (!fileHasNgElements) return ngClasses;
+
+  sourceFile.forEachChild(function walk(node) {
+    analyseClass: if (ts.isClassDeclaration(node)) {
+      const ngDecorators = getAngularDecorators(
+        typeChecker,
+        ts.getDecorators(node) || [],
+      ).filter((current) => knownNgElementTypes.includes(current.name));
+
+      if (ngDecorators.length < 1) break analyseClass;
+
+      if (
+        !ngDecorators.some((decorator) =>
+          extractMetadataLiteral(decorator.node),
+        )
+      )
+        break analyseClass;
+
+      ngClasses.push(new NgClass(node));
+    }
+
+    node.forEachChild(walk);
+  });
+
+  return ngClasses;
 }

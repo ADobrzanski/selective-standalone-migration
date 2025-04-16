@@ -14,7 +14,7 @@ import {
   getGlobalNodeId,
 } from "../tsc.helpers";
 import { ScriptContext } from "../main";
-import { NgElement } from "../types/ng-element.enum";
+import { NgElementType } from "../types/ng-element.enum";
 import ts from "typescript";
 
 type NgModuleDeclarationEntry = {

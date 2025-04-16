@@ -1,4 +1,4 @@
-export enum NgElement {
+export enum NgElementType {
   Directive = "Directive",
   Component = "Component",
   NgModule = "NgModule",

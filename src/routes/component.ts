@@ -7,6 +7,7 @@ import {
 import { getAtPath } from "../helpers";
 import { ScriptContext } from "../main";
 import {
+  a,
   div,
   getDocument,
   renderComponentListItemEntry,
@@ -14,7 +15,7 @@ import {
 } from "../html.helpers";
 import { getComponentImportExpressions } from "../angular-tsc.helpers";
 import ts from "typescript";
-import { NgElement } from "../types/ng-element.enum";
+import { NgElementType } from "../types/ng-element.enum";
 
 export const handleComponent = (
   _url: URL,
@@ -39,7 +40,7 @@ export const handleComponent = (
   }
 
   const component = context.elements
-    .filter((element) => element.type === NgElement.Component)
+    .filter((element) => element.type === NgElementType.Component)
     .find((component) => getGlobalNodeId(component.cls) === globalNodeId);
 
   if (!component) {
@@ -52,13 +53,19 @@ export const handleComponent = (
 
   const usedDirectives =
     context.checker.ng.getUsedDirectives(component.cls) ?? [];
+  // context.checker.ng.getPotentialTemplateDirectives(component.cls) ?? [];
+  // console.log("getTemplate", context.checker.ng.getTemplate(component.cls));
 
-  const nameTag = div(null, `Name: ${component.cls.name?.escapedText}`);
-  const declaredInTag = div(
-    null,
-    `Declared in: ${declaredIn ? declaredIn.name?.escapedText : "standalone"}`,
-  );
-  const title = nameTag + declaredInTag;
+  const meta = context.checker.ng.getDirectiveMetadata(component.cls);
+
+  const title = [
+    div(null, `Name: ${component.cls.name?.escapedText}`),
+    div(null, `- selector: ${meta?.selector}`),
+    div(
+      null,
+      `Declared in: ${declaredIn ? declaredIn.name?.escapedText : "standalone"}`,
+    ),
+  ].join("");
 
   const componentsHTML = [
     div(null, "Used components:"),
@@ -87,6 +94,19 @@ export const handleComponent = (
       new Set(context.elements.map((_) => _.cls)),
       context.checker.ng,
     ).map((potentialImport) => div(null, potentialImport.symbolName)),
+    a(
+      {
+        href: `/migrate-single/${encodeURIComponent(getGlobalNodeId(component.cls))}`,
+      },
+      "Make standalone",
+    ),
+    div(
+      null,
+      context.checker.ng
+        .getTemplate(component.cls)
+        ?.map((_) => _.sourceSpan.toString())
+        .join(),
+    ),
   ].join("");
 
   const html = [title, componentsHTML].join(`<hr>`);

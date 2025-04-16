@@ -157,7 +157,7 @@ async function getWorkspace(tree) {
 }
 
 // src/main.ts
-var import_typescript11 = __toESM(require("typescript"));
+var import_typescript17 = __toESM(require("typescript"));
 
 // src/utils/typescript/decorators.ts
 var import_typescript4 = __toESM(require("typescript"));
@@ -453,16 +453,24 @@ var handleGraph = (_url, _req, res) => {
 };
 
 // src/types/ng-element.enum.ts
-var NgElement = /* @__PURE__ */ ((NgElement2) => {
-  NgElement2["Directive"] = "Directive";
-  NgElement2["Component"] = "Component";
-  NgElement2["NgModule"] = "NgModule";
-  NgElement2["Pipe"] = "Pipe";
-  return NgElement2;
-})(NgElement || {});
+var NgElementType = /* @__PURE__ */ ((NgElementType2) => {
+  NgElementType2["Directive"] = "Directive";
+  NgElementType2["Component"] = "Component";
+  NgElementType2["NgModule"] = "NgModule";
+  NgElementType2["Pipe"] = "Pipe";
+  return NgElementType2;
+})(NgElementType || {});
 
 // src/angular-tsc.helpers.ts
+var import_typescript10 = __toESM(require("typescript"));
+
+// utils/typescript/decorators.ts
+var import_typescript9 = __toESM(require("typescript"));
+
+// utils/typescript/imports.ts
 var import_typescript8 = __toESM(require("typescript"));
+
+// src/angular-tsc.helpers.ts
 function findImportLocation(target, inComponent, importMode, typeChecker) {
   const importLocations = typeChecker.getPotentialImportsFor(
     target,
@@ -491,7 +499,7 @@ function findTemplateDependencies(decl, typeChecker) {
   const usedPipes = typeChecker.getUsedPipes(decl);
   if (usedDirectives !== null) {
     for (const dir of usedDirectives) {
-      if (import_typescript8.default.isClassDeclaration(dir.ref.node)) {
+      if (import_typescript10.default.isClassDeclaration(dir.ref.node)) {
         results.push(dir.ref);
       }
     }
@@ -499,7 +507,7 @@ function findTemplateDependencies(decl, typeChecker) {
   if (usedPipes !== null) {
     const potentialPipes = typeChecker.getPotentialPipes(decl);
     for (const pipe of potentialPipes) {
-      if (import_typescript8.default.isClassDeclaration(pipe.ref.node) && usedPipes.some((current) => pipe.name === current)) {
+      if (import_typescript10.default.isClassDeclaration(pipe.ref.node) && usedPipes.some((current) => pipe.name === current)) {
         results.push(pipe.ref);
       }
     }
@@ -527,6 +535,7 @@ function getComponentImportExpressions(decl, allDeclarations, typeChecker) {
   }
   return resolvedDependencies;
 }
+var knownNgElementTypes = Object.values(NgElementType);
 
 // src/routes/component.ts
 var handleComponent = (_url, _req, res, _server, context) => {
@@ -551,12 +560,15 @@ var handleComponent = (_url, _req, res, _server, context) => {
   }
   const declaredIn = context.checker.ng.getOwningNgModule(component.cls);
   const usedDirectives = context.checker.ng.getUsedDirectives(component.cls) ?? [];
-  const nameTag = div(null, `Name: ${component.cls.name?.escapedText}`);
-  const declaredInTag = div(
-    null,
-    `Declared in: ${declaredIn ? declaredIn.name?.escapedText : "standalone"}`
-  );
-  const title = nameTag + declaredInTag;
+  const meta = context.checker.ng.getDirectiveMetadata(component.cls);
+  const title = [
+    div(null, `Name: ${component.cls.name?.escapedText}`),
+    div(null, `- selector: ${meta?.selector}`),
+    div(
+      null,
+      `Declared in: ${declaredIn ? declaredIn.name?.escapedText : "standalone"}`
+    )
+  ].join("");
   const componentsHTML = [
     div(null, "Used components:"),
     ...usedDirectives.filter((directive) => directive.isComponent).map((directive) => {
@@ -579,7 +591,17 @@ var handleComponent = (_url, _req, res, _server, context) => {
       component.cls,
       new Set(context.elements.map((_) => _.cls)),
       context.checker.ng
-    ).map((potentialImport) => div(null, potentialImport.symbolName))
+    ).map((potentialImport) => div(null, potentialImport.symbolName)),
+    a(
+      {
+        href: `/migrate-single/${encodeURIComponent(getGlobalNodeId(component.cls))}`
+      },
+      "Make standalone"
+    ),
+    div(
+      null,
+      context.checker.ng.getTemplate(component.cls)?.map((_) => _.sourceSpan.toString()).join()
+    )
   ].join("");
   const html = [title, componentsHTML].join(`<hr>`);
   res.writeHead(200, { "Content-Type": "text/html" });
@@ -587,7 +609,7 @@ var handleComponent = (_url, _req, res, _server, context) => {
 };
 
 // src/routes/modules.ts
-var import_typescript9 = __toESM(require("typescript"));
+var import_typescript11 = __toESM(require("typescript"));
 var handleModules = (_url, _req, res, _server, context) => {
   const ngModules = context.elements.filter((element) => element.type === "NgModule" /* NgModule */).map((module2) => {
     let declarations = [];
@@ -596,7 +618,7 @@ var handleModules = (_url, _req, res, _server, context) => {
     const declarationsNode = findLiteralProperty(metadata, "declarations");
     if (!declarationsNode || !hasNgModuleMetadataElements(declarationsNode))
       return { ...module2, declarations };
-    declarations = getAllChildren(declarationsNode.initializer).filter((node) => import_typescript9.default.isIdentifier(node)).map((node) => {
+    declarations = getAllChildren(declarationsNode.initializer).filter((node) => import_typescript11.default.isIdentifier(node)).map((node) => {
       return {
         name: node,
         class: getClassDeclarationForImportedIdentifier(
@@ -610,13 +632,10 @@ var handleModules = (_url, _req, res, _server, context) => {
   const content = ngModules.reduce((acc, ngModule) => {
     const moduleId = getGlobalNodeId(ngModule.cls);
     const name = a(
-      { href: `/module/${encodeURIComponent(moduleId)}` },
+      { href: `/module/${encodeURIComponent(moduleId)}`, class: "block" },
       ngModule.cls.name?.text ?? "NgModule (name unresolvable)"
     );
-    const declarations = ngModule.declarations.filter((declaration) => declaration.class).map(
-      (declaration) => declaration.class && renderComponentListItemEntry(declaration.class, context.checker.ng)
-    ).join("");
-    return acc + name + declarations;
+    return acc + name;
   }, "");
   const css = `
       .block { display: block; }
@@ -626,15 +645,15 @@ var handleModules = (_url, _req, res, _server, context) => {
 };
 function findLiteralProperty(literal, name) {
   return literal.properties.find(
-    (prop) => prop.name && import_typescript9.default.isIdentifier(prop.name) && prop.name.text === name
+    (prop) => prop.name && import_typescript11.default.isIdentifier(prop.name) && prop.name.text === name
   );
 }
 function hasNgModuleMetadataElements(node) {
-  return import_typescript9.default.isPropertyAssignment(node) && (!import_typescript9.default.isArrayLiteralExpression(node.initializer) || node.initializer.elements.length > 0);
+  return import_typescript11.default.isPropertyAssignment(node) && (!import_typescript11.default.isArrayLiteralExpression(node.initializer) || node.initializer.elements.length > 0);
 }
 
 // src/routes/tests.ts
-var import_typescript10 = __toESM(require("typescript"));
+var import_typescript12 = __toESM(require("typescript"));
 var handleTests = (_url, _req, res, _server, context) => {
   const testFiles = context.source.files.filter((file) => {
     console.log(file.fileName);
@@ -674,6 +693,739 @@ var handleStatic = (_url, _req, res) => {
     }
     res.end(data);
   });
+};
+
+// src/routes/migrate-single.ts
+var import_typescript16 = __toESM(require("typescript"));
+
+// utils/change_tracker.ts
+var import_typescript14 = __toESM(require("typescript"));
+
+// utils/import_manager.ts
+var import_path4 = require("path");
+var import_typescript13 = __toESM(require("typescript"));
+var ImportManager = class {
+  constructor(getUpdateRecorder, printer) {
+    this.getUpdateRecorder = getUpdateRecorder;
+    this.printer = printer;
+  }
+  /** Map of import declarations that need to be updated to include the given symbols. */
+  updatedImports = /* @__PURE__ */ new Map();
+  /** Map of source-files and their previously used identifier names. */
+  usedIdentifierNames = /* @__PURE__ */ new Map();
+  /** Map of source files and the new imports that have to be added to them. */
+  newImports = /* @__PURE__ */ new Map();
+  /** Map between a file and the implied quote style for imports. */
+  quoteStyles = {};
+  /**
+   * Array of previously resolved symbol imports. Cache can be re-used to return
+   * the same identifier without checking the source-file again.
+   */
+  importCache = [];
+  /**
+   * Adds an import to the given source-file and returns the TypeScript
+   * identifier that can be used to access the newly imported symbol.
+   */
+  addImportToSourceFile(sourceFile, symbolName, moduleName, alias = null, typeImport = false, keepSymbolName = false) {
+    const sourceDir = (0, import_path4.dirname)(sourceFile.fileName);
+    let importStartIndex = 0;
+    let existingImport = null;
+    const cachedImport = this.importCache.find(
+      (c) => c.sourceFile === sourceFile && c.symbolName === symbolName && c.moduleName === moduleName && c.alias === alias
+    );
+    if (cachedImport) {
+      return cachedImport.identifier;
+    }
+    for (let i = sourceFile.statements.length - 1; i >= 0; i--) {
+      const statement = sourceFile.statements[i];
+      if (!import_typescript13.default.isImportDeclaration(statement) || !import_typescript13.default.isStringLiteral(statement.moduleSpecifier) || !statement.importClause) {
+        continue;
+      }
+      if (importStartIndex === 0) {
+        importStartIndex = this._getEndPositionOfNode(statement);
+      }
+      const moduleSpecifier = statement.moduleSpecifier.text;
+      if (moduleSpecifier.startsWith(".") && (0, import_path4.resolve)(sourceDir, moduleSpecifier) !== (0, import_path4.resolve)(sourceDir, moduleName) || moduleSpecifier !== moduleName) {
+        continue;
+      }
+      if (statement.importClause.namedBindings) {
+        const namedBindings = statement.importClause.namedBindings;
+        if (import_typescript13.default.isNamespaceImport(namedBindings) && !typeImport) {
+          return import_typescript13.default.factory.createPropertyAccessExpression(
+            import_typescript13.default.factory.createIdentifier(namedBindings.name.text),
+            import_typescript13.default.factory.createIdentifier(alias || symbolName || "default")
+          );
+        } else if (import_typescript13.default.isNamedImports(namedBindings) && symbolName) {
+          const existingElement = namedBindings.elements.find((e) => {
+            if (alias) {
+              return e.propertyName && e.name.text === alias && e.propertyName.text === symbolName;
+            }
+            return e.propertyName ? e.propertyName.text === symbolName : e.name.text === symbolName;
+          });
+          if (existingElement) {
+            return import_typescript13.default.factory.createIdentifier(existingElement.name.text);
+          }
+          existingImport = statement;
+        }
+      } else if (statement.importClause.name && !symbolName) {
+        return import_typescript13.default.factory.createIdentifier(statement.importClause.name.text);
+      }
+    }
+    if (existingImport) {
+      const { propertyName, name } = this._getImportParts(
+        sourceFile,
+        symbolName,
+        alias,
+        keepSymbolName
+      );
+      this.updatedImports.set(
+        existingImport,
+        (this.updatedImports.get(existingImport) || []).concat({
+          propertyName,
+          importName: name
+        })
+      );
+      this.importCache.push({
+        sourceFile,
+        moduleName,
+        symbolName,
+        alias,
+        identifier: name
+      });
+      return name;
+    }
+    let identifier = null;
+    if (!this.newImports.has(sourceFile)) {
+      this.newImports.set(sourceFile, {
+        importStartIndex,
+        defaultImports: /* @__PURE__ */ new Map(),
+        namedImports: /* @__PURE__ */ new Map()
+      });
+    }
+    if (symbolName) {
+      const { propertyName, name } = this._getImportParts(
+        sourceFile,
+        symbolName,
+        alias,
+        keepSymbolName
+      );
+      const importMap = this.newImports.get(sourceFile).namedImports;
+      identifier = name;
+      if (!importMap.has(moduleName)) {
+        importMap.set(moduleName, []);
+      }
+      importMap.get(moduleName).push(import_typescript13.default.factory.createImportSpecifier(false, propertyName, name));
+    } else {
+      const importMap = this.newImports.get(sourceFile).defaultImports;
+      identifier = this._getUniqueIdentifier(sourceFile, "defaultExport");
+      importMap.set(moduleName, identifier);
+    }
+    this.importCache.push({
+      sourceFile,
+      symbolName,
+      moduleName,
+      alias,
+      identifier
+    });
+    return identifier;
+  }
+  /**
+   * Stores the collected import changes within the appropriate update recorders. The
+   * updated imports can only be updated *once* per source-file because previous updates
+   * could otherwise shift the source-file offsets.
+   */
+  recordChanges() {
+    this.updatedImports.forEach((expressions, importDecl) => {
+      const sourceFile = importDecl.getSourceFile();
+      const recorder = this.getUpdateRecorder(sourceFile);
+      const namedBindings = importDecl.importClause.namedBindings;
+      const newNamedBindings = import_typescript13.default.factory.updateNamedImports(
+        namedBindings,
+        namedBindings.elements.concat(
+          expressions.map(
+            ({ propertyName, importName }) => import_typescript13.default.factory.createImportSpecifier(false, propertyName, importName)
+          )
+        )
+      );
+      const newNamedBindingsText = this.printer.printNode(
+        import_typescript13.default.EmitHint.Unspecified,
+        newNamedBindings,
+        sourceFile
+      );
+      recorder.updateExistingImport(namedBindings, newNamedBindingsText);
+    });
+    this.newImports.forEach(
+      ({ importStartIndex, defaultImports, namedImports }, sourceFile) => {
+        const recorder = this.getUpdateRecorder(sourceFile);
+        const useSingleQuotes = this._getQuoteStyle(sourceFile) === 0 /* Single */;
+        defaultImports.forEach((identifier, moduleName) => {
+          const newImport = import_typescript13.default.factory.createImportDeclaration(
+            void 0,
+            import_typescript13.default.factory.createImportClause(false, identifier, void 0),
+            import_typescript13.default.factory.createStringLiteral(moduleName, useSingleQuotes)
+          );
+          recorder.addNewImport(
+            importStartIndex,
+            this._getNewImportText(importStartIndex, newImport, sourceFile)
+          );
+        });
+        namedImports.forEach((specifiers, moduleName) => {
+          const newImport = import_typescript13.default.factory.createImportDeclaration(
+            void 0,
+            import_typescript13.default.factory.createImportClause(
+              false,
+              void 0,
+              import_typescript13.default.factory.createNamedImports(specifiers)
+            ),
+            import_typescript13.default.factory.createStringLiteral(moduleName, useSingleQuotes)
+          );
+          recorder.addNewImport(
+            importStartIndex,
+            this._getNewImportText(importStartIndex, newImport, sourceFile)
+          );
+        });
+      }
+    );
+  }
+  /** Gets an unique identifier with a base name for the given source file. */
+  _getUniqueIdentifier(sourceFile, baseName) {
+    if (this.isUniqueIdentifierName(sourceFile, baseName)) {
+      this._recordUsedIdentifier(sourceFile, baseName);
+      return import_typescript13.default.factory.createIdentifier(baseName);
+    }
+    let name = "";
+    let counter = 1;
+    do {
+      name = `${baseName}_${counter++}`;
+    } while (!this.isUniqueIdentifierName(sourceFile, name));
+    this._recordUsedIdentifier(sourceFile, name);
+    return import_typescript13.default.factory.createIdentifier(name);
+  }
+  /**
+   * Checks whether the specified identifier name is used within the given
+   * source file.
+   */
+  isUniqueIdentifierName(sourceFile, name) {
+    if (this.usedIdentifierNames.has(sourceFile) && this.usedIdentifierNames.get(sourceFile).indexOf(name) !== -1) {
+      return false;
+    }
+    const nodeQueue = [sourceFile];
+    while (nodeQueue.length) {
+      const node = nodeQueue.shift();
+      if (import_typescript13.default.isIdentifier(node) && node.text === name && // Identifiers that are aliased in an import aren't
+      // problematic since they're used under a different name.
+      (!import_typescript13.default.isImportSpecifier(node.parent) || node.parent.propertyName !== node)) {
+        return false;
+      }
+      nodeQueue.push(...node.getChildren());
+    }
+    return true;
+  }
+  _recordUsedIdentifier(sourceFile, identifierName) {
+    this.usedIdentifierNames.set(
+      sourceFile,
+      (this.usedIdentifierNames.get(sourceFile) || []).concat(identifierName)
+    );
+  }
+  /**
+   * Determines the full end of a given node. By default the end position of a node is
+   * before all trailing comments. This could mean that generated imports shift comments.
+   */
+  _getEndPositionOfNode(node) {
+    const nodeEndPos = node.getEnd();
+    const commentRanges = import_typescript13.default.getTrailingCommentRanges(
+      node.getSourceFile().text,
+      nodeEndPos
+    );
+    if (!commentRanges || !commentRanges.length) {
+      return nodeEndPos;
+    }
+    return commentRanges[commentRanges.length - 1].end;
+  }
+  /** Gets the text that should be added to the file for a newly-created import declaration. */
+  _getNewImportText(importStartIndex, newImport, sourceFile) {
+    const text = this.printer.printNode(
+      import_typescript13.default.EmitHint.Unspecified,
+      newImport,
+      sourceFile
+    );
+    return importStartIndex === 0 ? `${text}
+` : `
+${text}`;
+  }
+  /**
+   * Gets the different parts necessary to construct an import specifier.
+   * @param sourceFile File in which the import is being inserted.
+   * @param symbolName Name of the symbol.
+   * @param alias Alias that the symbol may be available under.
+   * @returns Object containing the different parts. E.g. `{name: 'alias', propertyName: 'name'}`
+   * would correspond to `import {name as alias}` while `{name: 'name', propertyName: undefined}`
+   * corresponds to `import {name}`.
+   */
+  _getImportParts(sourceFile, symbolName, alias, keepSymbolName) {
+    const symbolIdentifier = import_typescript13.default.factory.createIdentifier(symbolName);
+    const aliasIdentifier = alias ? import_typescript13.default.factory.createIdentifier(alias) : null;
+    const generatedUniqueIdentifier = this._getUniqueIdentifier(
+      sourceFile,
+      alias || symbolName
+    );
+    const needsGeneratedUniqueName = generatedUniqueIdentifier.text !== (alias || symbolName);
+    let propertyName;
+    let name;
+    if (needsGeneratedUniqueName && !keepSymbolName) {
+      propertyName = symbolIdentifier;
+      name = generatedUniqueIdentifier;
+    } else if (aliasIdentifier) {
+      propertyName = symbolIdentifier;
+      name = aliasIdentifier;
+    } else {
+      name = symbolIdentifier;
+    }
+    return { propertyName, name };
+  }
+  /** Gets the quote style that is used for a file's imports. */
+  _getQuoteStyle(sourceFile) {
+    if (!this.quoteStyles.hasOwnProperty(sourceFile.fileName)) {
+      let quoteStyle;
+      for (const statement of sourceFile.statements) {
+        if (import_typescript13.default.isImportDeclaration(statement) && import_typescript13.default.isStringLiteralLike(statement.moduleSpecifier)) {
+          quoteStyle = statement.moduleSpecifier.getText().trim().startsWith('"') ? 1 /* Double */ : 0 /* Single */;
+          break;
+        }
+      }
+      this.quoteStyles[sourceFile.fileName] = quoteStyle ?? 0 /* Single */;
+    }
+    return this.quoteStyles[sourceFile.fileName];
+  }
+};
+
+// utils/change_tracker.ts
+var ChangeTracker = class {
+  constructor(_printer, _importRemapper) {
+    this._printer = _printer;
+    this._importRemapper = _importRemapper;
+    this._importManager = new ImportManager(
+      (currentFile) => ({
+        addNewImport: (start, text) => this.insertText(currentFile, start, text),
+        updateExistingImport: (namedBindings, text) => this.replaceText(
+          currentFile,
+          namedBindings.getStart(),
+          namedBindings.getWidth(),
+          text
+        )
+      }),
+      this._printer
+    );
+  }
+  _changes = /* @__PURE__ */ new Map();
+  _importManager;
+  /**
+   * Tracks the insertion of some text.
+   * @param sourceFile File in which the text is being inserted.
+   * @param start Index at which the text is insert.
+   * @param text Text to be inserted.
+   */
+  insertText(sourceFile, index, text) {
+    this._trackChange(sourceFile, { start: index, text });
+  }
+  /**
+   * Replaces text within a file.
+   * @param sourceFile File in which to replace the text.
+   * @param start Index from which to replace the text.
+   * @param removeLength Length of the text being replaced.
+   * @param text Text to be inserted instead of the old one.
+   */
+  replaceText(sourceFile, start, removeLength, text) {
+    this._trackChange(sourceFile, { start, removeLength, text });
+  }
+  /**
+   * Replaces the text of an AST node with a new one.
+   * @param oldNode Node to be replaced.
+   * @param newNode New node to be inserted.
+   * @param emitHint Hint when formatting the text of the new node.
+   * @param sourceFileWhenPrinting File to use when printing out the new node. This is important
+   * when copying nodes from one file to another, because TypeScript might not output literal nodes
+   * without it.
+   */
+  replaceNode(oldNode, newNode, emitHint = import_typescript14.default.EmitHint.Unspecified, sourceFileWhenPrinting) {
+    const sourceFile = oldNode.getSourceFile();
+    this.replaceText(
+      sourceFile,
+      oldNode.getStart(),
+      oldNode.getWidth(),
+      this._printer.printNode(
+        emitHint,
+        newNode,
+        sourceFileWhenPrinting || sourceFile
+      )
+    );
+  }
+  /**
+   * Removes the text of an AST node from a file.
+   * @param node Node whose text should be removed.
+   */
+  removeNode(node) {
+    this._trackChange(node.getSourceFile(), {
+      start: node.getStart(),
+      removeLength: node.getWidth(),
+      text: ""
+    });
+  }
+  /**
+   * Adds an import to a file.
+   * @param sourceFile File to which to add the import.
+   * @param symbolName Symbol being imported.
+   * @param moduleName Module from which the symbol is imported.
+   * @param alias Alias to use for the import.
+   * @param keepSymbolName Whether to keep the symbol name in the import.
+   */
+  addImport(sourceFile, symbolName, moduleName, alias = null, keepSymbolName = false) {
+    if (this._importRemapper) {
+      moduleName = this._importRemapper(moduleName, sourceFile.fileName);
+    }
+    moduleName = normalizePath(moduleName);
+    return this._importManager.addImportToSourceFile(
+      sourceFile,
+      symbolName,
+      moduleName,
+      alias,
+      false,
+      keepSymbolName
+    );
+  }
+  /**
+   * Gets the changes that should be applied to all the files in the migration.
+   * The changes are sorted in the order in which they should be applied.
+   */
+  recordChanges() {
+    this._importManager.recordChanges();
+    return this._changes;
+  }
+  /**
+   * Clear the tracked changes
+   */
+  clearChanges() {
+    this._changes.clear();
+  }
+  /**
+   * Adds a change to a `ChangesByFile` map.
+   * @param file File that the change is associated with.
+   * @param change Change to be added.
+   */
+  _trackChange(file, change) {
+    const changes = this._changes.get(file);
+    if (changes) {
+      const insertIndex = changes.findIndex(
+        (current) => current.start <= change.start
+      );
+      if (insertIndex === -1) {
+        changes.push(change);
+      } else {
+        changes.splice(insertIndex, 0, change);
+      }
+    } else {
+      this._changes.set(file, [change]);
+    }
+  }
+};
+function normalizePath(path4) {
+  return path4.replace(/\\/g, "/");
+}
+
+// utils/typescript/nodes.ts
+var import_typescript15 = __toESM(require("typescript"));
+
+// src/routes/migrate-single.ts
+var import_path5 = require("path");
+var handleToStandalone = (_url, _req, res, _server, context) => {
+  const [_0, _globalNodeId] = _url.pathname.substring(1).split("/");
+  const globalNodeId = decodeURIComponent(_globalNodeId);
+  console.log("globalNodeId", globalNodeId);
+  const nodeData = getDataFromGlobalNodeId(globalNodeId);
+  const fsTreeNode = getAtPath(
+    context.source.tree,
+    nodeData.fileName.substring(1)
+  );
+  if (!isSourceFile(fsTreeNode)) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("Path does not point to the file.");
+    return;
+  }
+  const component = context.elements.filter((element) => element.type === "Component" /* Component */).find((component2) => getGlobalNodeId(component2.cls) === globalNodeId);
+  if (!component) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("Component not found in file.");
+    return;
+  }
+  const printer = import_typescript16.default.createPrinter();
+  toStandalone(component.cls, context, printer);
+};
+function toStandalone(toMigrate, context, printer, fileImportRemapper, declarationImportRemapper) {
+  const { program } = context;
+  const tree = context.schematic.tree;
+  const templateTypeChecker = program.compiler.getTemplateTypeChecker();
+  const declarations = /* @__PURE__ */ new Set();
+  const tracker = new ChangeTracker(printer, fileImportRemapper);
+  convertNgModuleDeclarationToStandalone(
+    toMigrate,
+    declarations,
+    tracker,
+    templateTypeChecker,
+    declarationImportRemapper
+  );
+  const pendingChanges = tracker.recordChanges();
+  console.log(pendingChanges);
+  for (const [file, changes] of pendingChanges.entries()) {
+    const update = tree.beginUpdate((0, import_path5.relative)(process.cwd(), file.fileName));
+    changes.forEach((change) => {
+      if (change.removeLength != null) {
+        update.remove(change.start, change.removeLength);
+      }
+      update.insertRight(change.start, change.text);
+    });
+    tree.commitUpdate(update);
+  }
+}
+function convertNgModuleDeclarationToStandalone(decl, allDeclarations, tracker, typeChecker, importRemapper) {
+  const directiveMeta = typeChecker.getDirectiveMetadata(decl);
+  if (directiveMeta && directiveMeta.decorator && !directiveMeta.isStandalone) {
+    let decorator = markDecoratorAsStandalone(directiveMeta.decorator);
+    if (directiveMeta.isComponent) {
+      const importsToAdd = getComponentImportExpressions2(
+        decl,
+        allDeclarations,
+        tracker,
+        typeChecker,
+        importRemapper
+      );
+      if (importsToAdd.length > 0) {
+        const hasTrailingComma = importsToAdd.length > 2 && !!extractMetadataLiteral2(directiveMeta.decorator)?.properties.hasTrailingComma;
+        decorator = setPropertyOnAngularDecorator(
+          decorator,
+          "imports",
+          import_typescript16.default.factory.createArrayLiteralExpression(
+            // Create a multi-line array when it has a trailing comma.
+            import_typescript16.default.factory.createNodeArray(importsToAdd, hasTrailingComma),
+            hasTrailingComma
+          )
+        );
+      }
+    }
+    tracker.replaceNode(directiveMeta.decorator, decorator);
+  } else {
+    const pipeMeta = typeChecker.getPipeMetadata(decl);
+    if (pipeMeta && pipeMeta.decorator && !pipeMeta.isStandalone) {
+      tracker.replaceNode(
+        pipeMeta.decorator,
+        markDecoratorAsStandalone(pipeMeta.decorator)
+      );
+    }
+  }
+}
+function getComponentImportExpressions2(decl, allDeclarations, tracker, typeChecker, importRemapper) {
+  const templateDependencies = findTemplateDependencies2(decl, typeChecker);
+  const usedDependenciesInMigration = new Set(
+    templateDependencies.filter((dep) => allDeclarations.has(dep.node))
+  );
+  const seenImports = /* @__PURE__ */ new Set();
+  const resolvedDependencies = [];
+  for (const dep of templateDependencies) {
+    const importLocation = findImportLocation2(
+      dep,
+      decl,
+      usedDependenciesInMigration.has(dep) ? 1 : 0,
+      // ? PotentialImportMode.ForceDirect
+      // : PotentialImportMode.Normal,
+      typeChecker
+    );
+    if (importLocation && !seenImports.has(importLocation.symbolName)) {
+      seenImports.add(importLocation.symbolName);
+      resolvedDependencies.push(importLocation);
+    }
+  }
+  return potentialImportsToExpressions(
+    resolvedDependencies,
+    decl.getSourceFile(),
+    tracker,
+    importRemapper
+  );
+}
+function potentialImportsToExpressions(potentialImports, toFile, tracker, importRemapper) {
+  const processedDependencies = importRemapper ? importRemapper(potentialImports) : potentialImports;
+  return processedDependencies.map((importLocation) => {
+    if (importLocation.moduleSpecifier) {
+      return tracker.addImport(
+        toFile,
+        importLocation.symbolName,
+        importLocation.moduleSpecifier
+      );
+    }
+    const identifier = import_typescript16.default.factory.createIdentifier(importLocation.symbolName);
+    if (!importLocation.isForwardReference) {
+      return identifier;
+    }
+    const forwardRefExpression = tracker.addImport(
+      toFile,
+      "forwardRef",
+      "@angular/core"
+    );
+    const arrowFunction = import_typescript16.default.factory.createArrowFunction(
+      void 0,
+      void 0,
+      [],
+      void 0,
+      void 0,
+      identifier
+    );
+    return import_typescript16.default.factory.createCallExpression(forwardRefExpression, void 0, [
+      arrowFunction
+    ]);
+  });
+}
+function markDecoratorAsStandalone(node) {
+  const metadata = extractMetadataLiteral2(node);
+  if (metadata === null || !import_typescript16.default.isCallExpression(node.expression)) {
+    return node;
+  }
+  const standaloneProp = metadata.properties.find((prop) => {
+    return isNamedPropertyAssignment(prop) && prop.name.text === "standalone";
+  });
+  if (!standaloneProp || standaloneProp.initializer.kind !== import_typescript16.default.SyntaxKind.FalseKeyword) {
+    return node;
+  }
+  const newProperties = metadata.properties.filter(
+    (element) => element !== standaloneProp
+  );
+  return import_typescript16.default.factory.createDecorator(
+    import_typescript16.default.factory.createCallExpression(
+      node.expression.expression,
+      node.expression.typeArguments,
+      [
+        import_typescript16.default.factory.createObjectLiteralExpression(
+          import_typescript16.default.factory.createNodeArray(
+            newProperties,
+            metadata.properties.hasTrailingComma
+          ),
+          newProperties.length > 1
+        )
+      ]
+    )
+  );
+}
+function setPropertyOnAngularDecorator(node, name, initializer) {
+  if (!import_typescript16.default.isCallExpression(node.expression) || node.expression.arguments.length > 1) {
+    return node;
+  }
+  let literalProperties;
+  let hasTrailingComma = false;
+  if (node.expression.arguments.length === 0) {
+    literalProperties = [
+      import_typescript16.default.factory.createPropertyAssignment(name, initializer)
+    ];
+  } else if (import_typescript16.default.isObjectLiteralExpression(node.expression.arguments[0])) {
+    const literal = node.expression.arguments[0];
+    const existingProperty = findLiteralProperty2(literal, name);
+    hasTrailingComma = literal.properties.hasTrailingComma;
+    if (existingProperty && import_typescript16.default.isPropertyAssignment(existingProperty)) {
+      literalProperties = literal.properties.slice();
+      literalProperties[literalProperties.indexOf(existingProperty)] = import_typescript16.default.factory.updatePropertyAssignment(
+        existingProperty,
+        existingProperty.name,
+        initializer
+      );
+    } else {
+      literalProperties = [
+        ...literal.properties,
+        import_typescript16.default.factory.createPropertyAssignment(name, initializer)
+      ];
+    }
+  } else {
+    return node;
+  }
+  return import_typescript16.default.factory.createDecorator(
+    import_typescript16.default.factory.createCallExpression(
+      node.expression.expression,
+      node.expression.typeArguments,
+      [
+        import_typescript16.default.factory.createObjectLiteralExpression(
+          import_typescript16.default.factory.createNodeArray(literalProperties, hasTrailingComma),
+          literalProperties.length > 1
+        )
+      ]
+    )
+  );
+}
+function isNamedPropertyAssignment(node) {
+  return import_typescript16.default.isPropertyAssignment(node) && node.name && import_typescript16.default.isIdentifier(node.name);
+}
+function findImportLocation2(target, inContext, importMode, typeChecker) {
+  const importLocations = typeChecker.getPotentialImportsFor(
+    target,
+    inContext,
+    importMode
+  );
+  let firstSameFileImport = null;
+  let firstModuleImport = null;
+  for (const location of importLocations) {
+    if (location.kind === 1) {
+      return location;
+    }
+    if (!location.moduleSpecifier && !firstSameFileImport) {
+      firstSameFileImport = location;
+    }
+    if (
+      // location.kind === PotentialImportKind.NgModule &&
+      location.kind === 0 && !firstModuleImport && // ɵ is used for some internal Angular modules that we want to skip over.
+      !location.symbolName.startsWith("\u0275")
+    ) {
+      firstModuleImport = location;
+    }
+  }
+  return firstSameFileImport || firstModuleImport || importLocations[0] || null;
+}
+function findTemplateDependencies2(decl, typeChecker) {
+  const results = [];
+  const usedDirectives = typeChecker.getUsedDirectives(decl);
+  const usedPipes = typeChecker.getUsedPipes(decl);
+  if (usedDirectives !== null) {
+    for (const dir of usedDirectives) {
+      if (import_typescript16.default.isClassDeclaration(dir.ref.node)) {
+        results.push(dir.ref);
+      }
+    }
+  }
+  if (usedPipes !== null) {
+    const potentialPipes = typeChecker.getPotentialPipes(decl);
+    for (const pipe of potentialPipes) {
+      if (import_typescript16.default.isClassDeclaration(pipe.ref.node) && usedPipes.some((current) => pipe.name === current)) {
+        results.push(pipe.ref);
+      }
+    }
+  }
+  return results;
+}
+function extractMetadataLiteral2(decorator) {
+  return import_typescript16.default.isCallExpression(decorator.expression) && decorator.expression.arguments.length === 1 && import_typescript16.default.isObjectLiteralExpression(decorator.expression.arguments[0]) ? decorator.expression.arguments[0] : null;
+}
+function findLiteralProperty2(literal, name) {
+  return literal.properties.find(
+    (prop) => prop.name && import_typescript16.default.isIdentifier(prop.name) && prop.name.text === name
+  );
+}
+
+// src/routes/components.ts
+var handleComponents = (_url, _req, res, _server, context) => {
+  const components = context.elements.filter(
+    (element) => element.type === "Component" /* Component */
+  );
+  const content = components.reduce((acc, component) => {
+    return acc + renderComponentListItemEntry(component.cls, context.checker.ng);
+  }, "");
+  const css = `
+      .block { display: block; }
+    `;
+  res.writeHead(200, { "Content-Type": "text/html" });
+  res.end(getDocument(content, css));
 };
 
 // src/main.ts
@@ -721,6 +1473,9 @@ function analyseDependencies(data) {
   );
   const context = {
     program,
+    schematic: {
+      tree: data.tree
+    },
     source: {
       files: sourceFiles,
       tree: fileTree
@@ -746,6 +1501,14 @@ function analyseDependencies(data) {
     {
       path: ["component", anyPattern],
       handler: handleComponent
+    },
+    {
+      path: ["migrate-single", anyPattern],
+      handler: handleToStandalone
+    },
+    {
+      path: ["components"],
+      handler: handleComponents
     },
     { path: ["shutdown", anyPattern], handler: handleShutdown },
     { path: ["static", anyPattern], handler: handleStatic }
@@ -793,7 +1556,7 @@ function makeFileTree(sourceFiles) {
   });
   return fileTree;
 }
-var ngElements = Object.values(NgElement);
+var ngElements = Object.values(NgElementType);
 function findNgClasses(sourceFile, typeChecker) {
   const modules = [];
   const fileHasNgElements = ngElements.some(
@@ -801,10 +1564,10 @@ function findNgClasses(sourceFile, typeChecker) {
   );
   if (!fileHasNgElements) return modules;
   sourceFile.forEachChild(function walk(node) {
-    analyseClass: if (import_typescript11.default.isClassDeclaration(node)) {
+    analyseClass: if (import_typescript17.default.isClassDeclaration(node)) {
       const ngDecorator = getAngularDecorators(
         typeChecker,
-        import_typescript11.default.getDecorators(node) || []
+        import_typescript17.default.getDecorators(node) || []
       ).find((current) => ngElements.includes(current.name));
       if (!ngDecorator) break analyseClass;
       const metadata = ngDecorator ? extractMetadataLiteral(ngDecorator.node) : null;
@@ -829,4 +1592,11 @@ function findNgClasses(sourceFile, typeChecker) {
  *
  * Use of this source code is governed by an MIT-style license that can be
  * found in the LICENSE file at https://angular.io/license
+ */
+/*!
+ * @license
+ * Copyright Google LLC All Rights Reserved.
+ *
+ * Use of this source code is governed by an MIT-style license that can be
+ * found in the LICENSE file at https://angular.dev/license
  */
