@@ -18,19 +18,16 @@ import { XMLParser } from "fast-xml-parser";
 import { ChangeTracker, ImportRemapper } from "../../utils/change_tracker";
 import { getAngularDecorators, NgDecorator } from "../../utils/ng_decorators";
 import { closestNode } from "../../utils/typescript/nodes";
-import { IncomingMessage, ServerResponse, Server } from "http";
 import { ScriptContext, context } from "../main";
-import {
-  getDataFromGlobalNodeId,
-  getGlobalNodeId,
-  isSourceFile,
-} from "../tsc.helpers";
-import { getAtPath } from "../helpers";
 import { NgElementType } from "../types/ng-element.enum";
 import { NamedClassDeclaration } from "../angular-tsc.helpers";
 import { relative, dirname } from "path";
 import * as fs from "fs";
 import { isClassImported } from "./migrate-single/utils";
+
+import { FastifyInstance, FastifyPluginOptions } from "fastify";
+import { FastifyPluginAsync } from "fastify";
+import { noElementWithId, notOfType } from "./api-responses";
 
 /**
  * Function that can be used to prcess the dependencies that
@@ -40,36 +37,42 @@ export type DeclarationImportsRemapper = (
   imports: PotentialImport[],
 ) => PotentialImport[];
 
-export const handleToStandaloneNew = (
-  _url: URL,
-  _req: IncomingMessage,
-  res: ServerResponse<IncomingMessage>,
-  _server: Server,
-  context: ScriptContext,
+export const toStandaloneRoute: FastifyPluginAsync = async (
+  fastify: FastifyInstance,
+  _options: FastifyPluginOptions,
 ) => {
-  const [_0, _elementId] = _url.pathname.substring(1).split("/");
-  const component = context.elements.at(Number(_elementId));
-  const printer = ts.createPrinter();
+  fastify.get("/component/:id/$makeStandalone", async (request, reply) => {
+    const id = Number((request.params as Record<string, string>).id);
+    const component = context.elements.at(id);
 
-  if (!component) return;
+    if (!component) {
+      reply.status(404).send(noElementWithId(id));
+      return;
+    }
 
-  const migrationIssues = findMigrationBlockers({
-    classDeclaration: component.cls,
-    templateTypeChecker: context.checker.ng,
+    if (component.type !== NgElementType.Component) {
+      reply.status(404).send(notOfType({ id, type: NgElementType.Component }));
+      return;
+    }
+
+    const printer = ts.createPrinter();
+
+    const migrationIssues = findMigrationBlockers({
+      classDeclaration: component.cls,
+      templateTypeChecker: context.checker.ng,
+    });
+    if (migrationIssues) {
+      reply.status(409).send(migrationIssues);
+      return;
+    }
+
+    console.log("about to migrate");
+    toStandalone(component.cls, context, printer);
+
+    context.server.shut();
+
+    reply.status(200).send();
   });
-  if (migrationIssues) {
-    res.writeHead(409, { "Content-Type": "text/json" });
-    res.end(JSON.stringify(migrationIssues));
-    return;
-  }
-
-  console.log("about to migrate");
-  toStandalone(component.cls, context, printer);
-
-  context.server.shut();
-
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("Yeehaa");
 };
 
 function findMigrationBlockers(data: {
@@ -137,47 +140,6 @@ function findMigrationBlockers(data: {
     dependencies: sameModuleDependencies.map((_) => _.node.name.text),
   };
 }
-
-export const handleToStandalone = (
-  _url: URL,
-  _req: IncomingMessage,
-  res: ServerResponse<IncomingMessage>,
-  _server: Server,
-  context: ScriptContext,
-) => {
-  const [_0, _globalNodeId] = _url.pathname.substring(1).split("/");
-  const globalNodeId = decodeURIComponent(_globalNodeId);
-  console.log("globalNodeId", globalNodeId);
-  const nodeData = getDataFromGlobalNodeId(globalNodeId);
-  const fsTreeNode = getAtPath(
-    context.source.tree,
-    nodeData.fileName.substring(1),
-  );
-
-  if (!isSourceFile(fsTreeNode)) {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("Path does not point to the file.");
-    return;
-  }
-
-  const component = context.elements
-    .filter((element) => element.type === NgElementType.Component)
-    .find((component) => getGlobalNodeId(component.cls) === globalNodeId);
-
-  if (!component) {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("Component not found in file.");
-    return;
-  }
-
-  const printer = ts.createPrinter();
-  toStandalone(component.cls, context, printer);
-
-  context.server.shut();
-
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("Yeehaa");
-};
 
 /**
  * Converts all declarations in the specified files to standalone.

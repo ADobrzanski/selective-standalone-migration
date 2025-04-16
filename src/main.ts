@@ -1,38 +1,23 @@
+import path from "path";
+import Fastify, { FastifyInstance } from "fastify";
+import FastifyStatic from "@fastify/static";
 import { createProgramOptions } from "./utils/typescript/compiler_host";
 import { Reference } from "@angular/compiler-cli/src/ngtsc/imports";
 import { getProjectTsConfigPaths } from "./utils/project_tsconfig_paths";
 import ts from "typescript";
 import { NgDecorator, getAngularDecorators } from "./utils/ng_decorators";
 import { NgtscProgram } from "@angular/compiler-cli";
-import http, { IncomingMessage, ServerResponse } from "http";
 import { extractMetadataLiteral, getImportSpecifier } from "./tsc.helpers";
-import { isNil } from "./ts.helpers";
 import { TemplateTypeChecker } from "@angular/compiler-cli/src/ngtsc/typecheck/api";
-import { handleFile } from "./routes/file";
-import { handleShutdown } from "./routes/shutdown";
-import { handleNodeInFile } from "./routes/file/node";
-import { handleGraph } from "./routes/graph";
 import { NgElementType } from "./types/ng-element.enum";
-import { handleComponent } from "./routes/component";
-import { handleModules } from "./routes/modules";
-import { handleTests } from "./routes/tests";
-import { handleStatic } from "./routes/static";
-import { handleToStandaloneNew } from "./routes/migrate-single";
 
-import {
-  GET_component,
-  GET_component_dependency_list,
-  GET_component_dependency,
-  GET_component_list,
-  GET_component_consumer_list,
-  GET_directive_list,
-} from "./routes/api";
+import apiRoutes from "./routes/api";
 import { Tree } from "@angular-devkit/schematics";
-import { handleComponents } from "./routes/components";
 import {
   NamedClassDeclaration,
   findTemplateDependencies,
 } from "./angular-tsc.helpers";
+import { toStandaloneRoute } from "./routes/migrate-single";
 
 export type FsTreeNode = { [pahtSegment: string]: FsTreeNode | ts.SourceFile };
 
@@ -57,7 +42,7 @@ export type ScriptContext = {
     dependencies(): Reference<NamedClassDeclaration>[];
   }[];
   server: {
-    instance: http.Server;
+    instance: FastifyInstance;
     shut(): void;
   };
 };
@@ -135,101 +120,24 @@ async function analyseDependencies(data) {
 
   // GLOBALS end
 
-  const anyPattern = /^.*$/;
-  const nodeIdPattern = /^[\w-]*$/;
+  const fastify = Fastify();
 
-  type Route = {
-    path: (string | RegExp)[];
-    handler: (
-      url: URL,
-      req: IncomingMessage,
-      res: ServerResponse<IncomingMessage>,
-      server: http.Server,
-      context: ScriptContext,
-    ) => void;
-  };
+  fastify.register(FastifyStatic, {
+    root: path.join(__dirname, "static"),
+    prefix: "/static/",
+  });
+  fastify.register(apiRoutes, { prefix: "/api" });
+  fastify.register(toStandaloneRoute, { prefix: "/api" });
 
-  const routes: Route[] = [
-    { path: [""], handler: handleFile },
-    { path: ["file", anyPattern], handler: handleFile },
-    { path: ["api", "component"], handler: GET_component_list },
-    { path: ["api", "directive"], handler: GET_directive_list },
-    { path: ["api", "component", anyPattern], handler: GET_component },
-    {
-      path: ["api", "component", anyPattern, "dependency"],
-      handler: GET_component_dependency_list,
-    },
-    {
-      path: ["api", "component", anyPattern, "consumer"],
-      handler: GET_component_consumer_list,
-    },
-    {
-      path: ["api", "component", anyPattern, "dependency", anyPattern],
-      handler: GET_component_dependency,
-    },
-    {
-      path: ["file", anyPattern, "node", nodeIdPattern],
-      handler: handleNodeInFile,
-    },
-    { path: ["modules"], handler: handleModules },
-    { path: ["tests"], handler: handleTests },
-    { path: ["graph"], handler: handleGraph },
-    {
-      path: ["component", anyPattern],
-      handler: handleComponent,
-    },
-    {
-      path: ["migrate-single", anyPattern],
-      handler: handleToStandaloneNew,
-    },
-    {
-      path: ["components"],
-      handler: handleComponents,
-    },
-    { path: ["shutdown", anyPattern], handler: handleShutdown },
-    { path: ["static", anyPattern], handler: handleStatic },
-  ];
-
-  const server = http.createServer((req, res) => {
-    const url = new URL(`http://localhost:3000${req.url}`);
-    const pathnameSegments = url.pathname.substring(1).split("/");
-
-    const matchingRoute = routes.find((route) => {
-      if (route.path.length !== pathnameSegments.length) return false;
-
-      for (let idx in pathnameSegments) {
-        if (isNil(route.path[idx])) return false;
-
-        if (
-          typeof route.path[idx] === "string" &&
-          route.path[idx] !== pathnameSegments[idx]
-        ) {
-          return false;
-        }
-
-        if (
-          route.path[idx] instanceof RegExp &&
-          !pathnameSegments[idx].match(route.path[idx])
-        ) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-
-    if (matchingRoute) {
-      matchingRoute.handler(url, req, res, server, context);
-    } else {
-      res.writeHead(404, { "Content-Type": "text/plain" });
-      res.end("Not Found");
-    }
+  fastify.listen({ port: 3000 }, (err, address) => {
+    if (err) throw err;
+    console.log(`Listening on ${address}`);
   });
 
   const createSignal = () => {
-    const promiseObj = { resolve(x: unknown) {}, reject() {} };
+    const promiseObj = { resolve() {}, reject() {} };
     const promise = new Promise((resolve, reject) => {
-      promiseObj.resolve = () => resolve();
+      promiseObj.resolve = () => resolve(undefined);
       promiseObj.reject = () => reject();
     });
     return { ...promiseObj, instance: promise };
@@ -237,20 +145,16 @@ async function analyseDependencies(data) {
 
   const shutdownSignal = createSignal();
   context.server = {
-    instance: server,
+    instance: fastify,
     shut() {
-      shutdownSignal.resolve(null);
-      console.log("should resolve by now");
+      shutdownSignal.resolve();
+      fastify.close();
+      console.log("Server closed.");
     },
   };
 
-  server.listen(3000, () => {
-    console.log("Server is listening on http://localhost:3000");
-  });
-
   await shutdownSignal.instance;
-  console.log("yeehaa");
-  server.close();
+  console.log("Script finished.");
 }
 
 // local helpers

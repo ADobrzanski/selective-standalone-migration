@@ -33,7 +33,7 @@
         <div>
           <h3 x-template>${component.name}</h3>
           <template x-if="!component.standalone">
-            <button @click="fetch(`/migrate-single/${id}`)">
+            <button @click="fetch(`/api/component/${id}/$makeStandalone`)">
               Make standalone
             </button>
           </template>

@@ -1,104 +1,10 @@
-import { IncomingMessage, Server, ServerResponse } from "http";
 import ts from "typescript";
 import { NgElementType } from "../types/ng-element.enum";
 import { context } from "../main";
 import { NamedClassDeclaration } from "../angular-tsc.helpers";
-
-const respond = (res: ServerResponse<IncomingMessage>) => {
-  return {
-    with(opts: { data: unknown; code: number }): void {
-      if (typeof opts.data === "string") {
-        res.writeHead(opts.code, { "Content-Type": "text/plain" });
-        res.end(opts.data);
-      } else {
-        res.writeHead(opts.code, { "Content-Type": "text/json" });
-        res.end(JSON.stringify(opts.data));
-      }
-    },
-    ok(data: unknown): void {
-      return this.with({ data, code: 200 });
-    },
-    notFoundId(id: number): void {
-      return this.with({
-        data: { details: `No element with ID equal ${id}.` },
-        code: 404,
-      });
-    },
-    notOfType(opts: { id: number; type: NgElementType | string }): void {
-      return this.with({
-        code: 404,
-        data: {
-          details: `Element with ID equal ${opts.id} is not ${opts.type}.`,
-        },
-      });
-    },
-  };
-};
-
-export const GET_module_list = (
-  _url: URL,
-  _req: IncomingMessage,
-  res: ServerResponse<IncomingMessage>,
-  _server: Server,
-) => {
-  const moduleList = context.elements
-    .map((element, id) => ({ ...element, id }))
-    .filter((element) => element.type === NgElementType.NgModule)
-    .map((component) => getComponent(component.cls));
-
-  respond(res).ok(moduleList);
-};
-
-export const GET_component_list = (
-  _url: URL,
-  _req: IncomingMessage,
-  res: ServerResponse<IncomingMessage>,
-  _server: Server,
-) => {
-  const componentList = context.elements
-    .map((element, id) => ({ ...element, id }))
-    .filter((element) => element.type === NgElementType.Component)
-    .map((component) => getComponent(component.cls));
-
-  respond(res).ok(componentList);
-};
-
-export const GET_directive_list = (
-  _url: URL,
-  _req: IncomingMessage,
-  res: ServerResponse<IncomingMessage>,
-  _server: Server,
-) => {
-  const directiveList = context.elements
-    .map((element, id) => ({ ...element, id }))
-    .filter((element) => element.type === NgElementType.Directive)
-    .map((component) => getDirective(component.cls));
-
-  respond(res).ok(directiveList);
-};
-
-export const GET_component = (
-  url: URL,
-  _req: IncomingMessage,
-  res: ServerResponse<IncomingMessage>,
-  _server: Server,
-) => {
-  const [_0, _path, idString] = getPathnameElements(url);
-  const id = Number(idString);
-  const element = context.elements.at(id);
-
-  if (!element) {
-    respond(res).notFoundId(id);
-    return;
-  }
-
-  if (element.type !== NgElementType.Component) {
-    respond(res).notOfType({ id, type: NgElementType.Component });
-    return;
-  }
-
-  respond(res).ok(getComponent(element.cls));
-};
+import { FastifyInstance, FastifyPluginOptions } from "fastify";
+import { FastifyPluginAsync } from "fastify";
+import { noElementWithId, notOfType } from "./api-responses";
 
 const getPipe = (cls: ts.ClassDeclaration) => {
   const meta = getPipeMetadata(cls);
@@ -117,154 +23,6 @@ const getPipe = (cls: ts.ClassDeclaration) => {
   };
 };
 
-export const GET_component_dependency_list = (
-  url: URL,
-  _req: IncomingMessage,
-  res: ServerResponse<IncomingMessage>,
-  _server: Server,
-) => {
-  const [_api, _componenet, idString, _dependency] = getPathnameElements(url);
-  const id = Number(idString);
-
-  const element = context.elements.at(id);
-
-  if (!element) {
-    return respond(res).notFoundId(id);
-  }
-
-  if (element.type !== NgElementType.Component) {
-    return respond(res).notOfType({ id, type: NgElementType.Component });
-  }
-
-  const dependencies = element
-    .dependencies()
-    .map((dep) => {
-      const depCls = dep.node as ts.ClassDeclaration;
-      try {
-        return getDirective(depCls);
-      } catch (e) {
-        /* ignore */
-      }
-      try {
-        return getPipe(depCls);
-      } catch (e) {
-        /* ignore */
-      }
-      return null;
-    })
-    .filter(Boolean);
-
-  respond(res).ok(dependencies);
-};
-
-export const GET_component_consumer_list = (
-  url: URL,
-  _req: IncomingMessage,
-  res: ServerResponse<IncomingMessage>,
-  _server: Server,
-) => {
-  const [_api, _componenet, idString, _consumer] = getPathnameElements(url);
-  const id = Number(idString);
-
-  const element = context.elements.at(id);
-
-  if (!element) {
-    respond(res).notFoundId(id);
-    return;
-  }
-
-  if (element.type !== NgElementType.Component) {
-    respond(res).notOfType({ id, type: NgElementType.Component });
-    return;
-  }
-
-  const directConsumers = context.elements
-    .filter((el) => el.type === NgElementType.Component)
-    .filter((cp, index, array) => {
-      console.log(
-        `(${index}/${array.length}) analysing ${cp.cls.name?.escapedText}`,
-      );
-      const dependencies = cp.dependencies();
-
-      const hit = dependencies
-        .map((dep) => dep.node)
-        .includes(element.cls as NamedClassDeclaration);
-
-      if (hit)
-        console.log(
-          `(${index}/${array.length}) ${cp.cls.name?.escapedText} is a HIT!`,
-        );
-
-      return hit;
-    });
-
-  respond(res).ok(
-    directConsumers.map((consumer) => {
-      switch (consumer.type) {
-        case NgElementType.Pipe:
-          return getPipe(consumer.cls);
-        case NgElementType.Component:
-          return getComponent(consumer.cls);
-        case NgElementType.Directive:
-          return getDirective(consumer.cls);
-        case NgElementType.NgModule:
-          // Should not happen really
-          return getModule(consumer.cls);
-      }
-    }),
-  );
-};
-
-export const GET_component_dependency = (
-  url: URL,
-  _req: IncomingMessage,
-  res: ServerResponse<IncomingMessage>,
-  _server: Server,
-) => {
-  const [_api, _componenetId, idString, _dependency, depIdString] =
-    getPathnameElements(url);
-  const componentId = Number(idString);
-  const depId = Number(depIdString);
-
-  const component = context.elements.at(componentId);
-  const dep = context.elements.at(depId);
-
-  if (!component) return respond(res).notFoundId(componentId);
-
-  if (component.type !== NgElementType.Component)
-    return respond(res).notOfType({
-      id: componentId,
-      type: NgElementType.Component,
-    });
-
-  if (!dep) return respond(res).notFoundId(depId);
-
-  const templateDependencyTypes = [
-    NgElementType.Component,
-    NgElementType.Directive,
-    NgElementType.Pipe,
-  ];
-  if (templateDependencyTypes.includes(dep.type))
-    return respond(res).notOfType({
-      id: depId,
-      type: templateDependencyTypes.join(", "),
-    });
-
-  if (
-    dep.type === NgElementType.Component ||
-    dep.type === NgElementType.Directive
-  ) {
-    respond(res).ok(getDirective(dep.cls));
-  } else {
-    respond(res).ok(getPipe(dep.cls));
-  }
-};
-
-const getPathnameElements = (url: URL): string[] => {
-  return url.pathname.substring(1).split("/");
-};
-
-// local helpers
 const getDirectiveMetadata = (cls: ts.ClassDeclaration) =>
   context.checker.ng.getDirectiveMetadata(cls);
 
@@ -318,3 +76,194 @@ const getModule = (cls: ts.ClassDeclaration) => {
 
   return module;
 };
+
+const apiRoutes: FastifyPluginAsync = async (
+  fastify: FastifyInstance,
+  _options: FastifyPluginOptions,
+) => {
+  fastify.get("/module", async (_request, _reply) => {
+    const moduleList = context.elements
+      .map((element, id) => ({ ...element, id }))
+      .filter((element) => element.type === NgElementType.NgModule)
+      .map((component) => getModule(component.cls));
+
+    return moduleList;
+  });
+
+  fastify.get("/component", async (_request, _reply) => {
+    const componentList = context.elements
+      .map((element, id) => ({ ...element, id }))
+      .filter((element) => element.type === NgElementType.Component)
+      .map((component) => getComponent(component.cls));
+
+    return componentList;
+  });
+
+  fastify.get("/component/:id", async (request, reply) => {
+    const id = Number((request.params as Record<string, string>).id);
+    const element = context.elements.at(id);
+
+    if (!element) {
+      reply.status(404).send(noElementWithId(id));
+      return;
+    }
+
+    if (element.type !== NgElementType.Component) {
+      reply.status(404).send(notOfType({ id, type: NgElementType.Component }));
+      return;
+    }
+
+    return getComponent(element.cls);
+  });
+
+  fastify.get("/component/:id/dependency", async (request, reply) => {
+    const id = Number((request.params as Record<string, string>).id);
+    const element = context.elements.at(id);
+
+    if (!element) {
+      reply.status(404).send(noElementWithId(id));
+      return;
+    }
+
+    if (element.type !== NgElementType.Component) {
+      reply.status(404).send(notOfType({ id, type: NgElementType.Component }));
+      return;
+    }
+
+    const dependencies = element
+      .dependencies()
+      .map((dep) => {
+        const depCls = dep.node as ts.ClassDeclaration;
+
+        try {
+          return getDirective(depCls);
+        } catch (e) {
+          /* ignore */
+        }
+
+        try {
+          return getPipe(depCls);
+        } catch (e) {
+          /* ignore */
+        }
+
+        return null;
+      })
+      .filter(Boolean);
+
+    return dependencies;
+  });
+
+  fastify.get(
+    "/component/:id/dependency/:dependencyId",
+    async (request, reply) => {
+      const params = request.params as Record<string, string>;
+
+      const componentId = Number(params.id);
+      const depId = Number(params.dependencyId);
+
+      const component = context.elements.at(componentId);
+      const dep = context.elements.at(depId);
+
+      if (!component) {
+        reply.status(404).send(noElementWithId(componentId));
+        return;
+      }
+
+      if (component.type !== NgElementType.Component) {
+        reply
+          .status(400)
+          .send(notOfType({ id: componentId, type: NgElementType.Component }));
+        return;
+      }
+
+      if (!dep) {
+        reply.status(404).send(noElementWithId(depId));
+        return;
+      }
+
+      const templateDependencyTypes = [
+        NgElementType.Component,
+        NgElementType.Directive,
+        NgElementType.Pipe,
+      ];
+      if (!templateDependencyTypes.includes(dep.type)) {
+        reply
+          .status(400)
+          .send(
+            notOfType({ id: depId, type: templateDependencyTypes.join(", ") }),
+          );
+        return;
+      }
+
+      if (
+        dep.type === NgElementType.Component ||
+        dep.type === NgElementType.Directive
+      ) {
+        return getDirective(dep.cls);
+      } else {
+        return getPipe(dep.cls);
+      }
+    },
+  );
+
+  fastify.get("/component/:id/consumer", async (request, reply) => {
+    const id = Number((request.params as Record<string, string>).id);
+    const element = context.elements.at(id);
+
+    if (!element) {
+      reply.status(404).send(noElementWithId(id));
+      return;
+    }
+
+    if (element.type !== NgElementType.Component) {
+      reply.status(404).send(notOfType({ id, type: NgElementType.Component }));
+      return;
+    }
+
+    const directConsumers = context.elements
+      .filter((el) => el.type === NgElementType.Component)
+      .filter((cp, index, array) => {
+        console.log(
+          `(${index}/${array.length}) analysing ${cp.cls.name?.escapedText}`,
+        );
+        const dependencies = cp.dependencies();
+
+        const hit = dependencies
+          .map((dep) => dep.node)
+          .includes(element.cls as NamedClassDeclaration);
+
+        if (hit)
+          console.log(
+            `(${index}/${array.length}) ${cp.cls.name?.escapedText} is a HIT!`,
+          );
+
+        return hit;
+      });
+
+    return directConsumers.map((consumer) => {
+      switch (consumer.type) {
+        case NgElementType.Pipe:
+          return getPipe(consumer.cls);
+        case NgElementType.Component:
+          return getComponent(consumer.cls);
+        case NgElementType.Directive:
+          return getDirective(consumer.cls);
+        case NgElementType.NgModule:
+          // Should not happen really
+          return getModule(consumer.cls);
+      }
+    });
+  });
+
+  fastify.get("/directive", async (_request, _reply) => {
+    const directiveList = context.elements
+      .map((element, id) => ({ ...element, id }))
+      .filter((element) => element.type === NgElementType.Directive)
+      .map((component) => getDirective(component.cls));
+
+    return directiveList;
+  });
+};
+
+export default apiRoutes;
