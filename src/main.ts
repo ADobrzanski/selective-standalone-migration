@@ -1,4 +1,5 @@
 import { createProgramOptions } from "./utils/typescript/compiler_host";
+import { Reference } from "@angular/compiler-cli/src/ngtsc/imports";
 import { getProjectTsConfigPaths } from "./utils/project_tsconfig_paths";
 import ts from "typescript";
 import { NgDecorator, getAngularDecorators } from "./utils/ng_decorators";
@@ -16,20 +17,21 @@ import { handleComponent } from "./routes/component";
 import { handleModules } from "./routes/modules";
 import { handleTests } from "./routes/tests";
 import { handleStatic } from "./routes/static";
-import {
-  handleToStandalone,
-  handleToStandaloneNew,
-} from "./routes/migrate-single";
+import { handleToStandaloneNew } from "./routes/migrate-single";
 
 import {
   GET_component,
   GET_component_dependency_list,
   GET_component_dependency,
   GET_component_list,
+  GET_component_consumer_list,
 } from "./routes/api";
 import { Tree } from "@angular-devkit/schematics";
 import { handleComponents } from "./routes/components";
-import { create } from "domain";
+import {
+  NamedClassDeclaration,
+  findTemplateDependencies,
+} from "./angular-tsc.helpers";
 
 export type FsTreeNode = { [pahtSegment: string]: FsTreeNode | ts.SourceFile };
 
@@ -50,6 +52,7 @@ export type ScriptContext = {
     cls: ts.ClassDeclaration;
     type: NgElementType;
     decorator: NgDecorator;
+    dependencies(): Reference<NamedClassDeclaration>[];
   }[];
   server: {
     instance: http.Server;
@@ -151,6 +154,10 @@ async function analyseDependencies(data) {
       handler: GET_component_dependency_list,
     },
     {
+      path: ["api", "component", anyPattern, "consumer"],
+      handler: GET_component_consumer_list,
+    },
+    {
       path: ["api", "component", anyPattern, "dependency", anyPattern],
       handler: GET_component_dependency,
     },
@@ -187,14 +194,22 @@ async function analyseDependencies(data) {
       for (let idx in pathnameSegments) {
         if (isNil(route.path[idx])) return false;
 
-        if (typeof route.path[idx] === "string") {
-          return route.path[idx] === pathnameSegments[idx];
+        if (
+          typeof route.path[idx] === "string" &&
+          route.path[idx] !== pathnameSegments[idx]
+        ) {
+          return false;
         }
 
-        if (route.path[idx] instanceof RegExp) {
-          return pathnameSegments[idx].match(route.path[idx]);
+        if (
+          route.path[idx] instanceof RegExp &&
+          !pathnameSegments[idx].match(route.path[idx])
+        ) {
+          return false;
         }
       }
+
+      return true;
     });
 
     if (matchingRoute) {
@@ -271,6 +286,7 @@ function findNgClasses(sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker) {
     cls: ts.ClassDeclaration;
     decorator: NgDecorator;
     type: NgElementType;
+    dependencies(): Reference<NamedClassDeclaration>[];
   }[] = [];
 
   const fileHasNgElements = ngElements.some((element) =>
@@ -298,6 +314,15 @@ function findNgClasses(sourceFile: ts.SourceFile, typeChecker: ts.TypeChecker) {
         cls: node,
         decorator: ngDecorator,
         type: ngDecorator.name as NgElementType,
+        dependencies() {
+          if (!this.__templateDependencies) {
+            this.__templateDependencies = findTemplateDependencies(
+              this.cls,
+              context.checker.ng,
+            );
+          }
+          return this.__templateDependencies;
+        },
       });
     }
 

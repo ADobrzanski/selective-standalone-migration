@@ -25,7 +25,7 @@ class DependencyChart extends HTMLElement {
       case "data":
         try {
           this.data = JSON.parse(newValue);
-          console.log(this.data);
+          console.table(this.data);
         } catch (e) {
           console.error(e);
         }
@@ -35,17 +35,28 @@ class DependencyChart extends HTMLElement {
     this.render();
   }
 
+  emitNodeSuperClick(detail) {
+    const event = new CustomEvent("node-super-click", {
+      detail,
+      bubbles: true,
+      cancelable: true,
+    });
+    this.dispatchEvent(event);
+  }
+
   render() {
     const graph = Tree(this.data, {
-      width: this.shadow.host.clientWidth,
+      width: 1200,
       height: 500,
       label: (d) => d.name,
+      onNodeCommandClick: (_e, node) => this.emitNodeSuperClick(node.data),
     });
     if (this.root) {
-      this.shadow.replaceChild(this.root, graph);
+      this.shadow.replaceChild(graph, this.root);
     } else {
       this.shadow.appendChild(graph);
     }
+
     this.root = graph;
   }
 }

@@ -2,12 +2,38 @@ import { IncomingMessage, Server, ServerResponse } from "http";
 import ts from "typescript";
 import { NgElementType } from "../types/ng-element.enum";
 import { context } from "../main";
-import { PotentialImportMode } from "../angular-tsc.helpers";
-import {
-  PotentialImport,
-  Reference,
-} from "@angular/compiler-cli/private/migrations";
-import { ClassDeclaration } from "@angular/compiler-cli/src/ngtsc/reflection";
+import { NamedClassDeclaration } from "../angular-tsc.helpers";
+
+const respond = (res: ServerResponse<IncomingMessage>) => {
+  return {
+    with(opts: { data: unknown; code: number }): void {
+      if (typeof opts.data === "string") {
+        res.writeHead(opts.code, { "Content-Type": "text/plain" });
+        res.end(opts.data);
+      } else {
+        res.writeHead(opts.code, { "Content-Type": "text/json" });
+        res.end(JSON.stringify(opts.data));
+      }
+    },
+    ok(data: unknown): void {
+      return this.with({ data, code: 200 });
+    },
+    notFoundId(id: number): void {
+      return this.with({
+        data: { details: `No element with ID equal ${id}.` },
+        code: 404,
+      });
+    },
+    notOfType(opts: { id: number; type: NgElementType | string }): void {
+      return this.with({
+        code: 404,
+        data: {
+          details: `Element with ID equal ${opts.id} is not ${opts.type}.`,
+        },
+      });
+    },
+  };
+};
 
 export const GET_module_list = (
   _url: URL,
@@ -15,18 +41,12 @@ export const GET_module_list = (
   res: ServerResponse<IncomingMessage>,
   _server: Server,
 ) => {
-  res.writeHead(200, { "Content-Type": "text/json" });
-  res.end(
-    JSON.stringify(
-      context.elements
-        .map((element, id) => ({ ...element, id }))
-        .filter((element) => element.type === NgElementType.NgModule)
-        .map((component) => ({
-          id: component.id,
-          ...getComponent(component.cls),
-        })),
-    ),
-  );
+  const moduleList = context.elements
+    .map((element, id) => ({ ...element, id }))
+    .filter((element) => element.type === NgElementType.NgModule)
+    .map((component) => getComponent(component.cls));
+
+  respond(res).ok(moduleList);
 };
 
 export const GET_component_list = (
@@ -35,18 +55,12 @@ export const GET_component_list = (
   res: ServerResponse<IncomingMessage>,
   _server: Server,
 ) => {
-  res.writeHead(200, { "Content-Type": "text/json" });
-  res.end(
-    JSON.stringify(
-      context.elements
-        .map((element, id) => ({ ...element, id }))
-        .filter((element) => element.type === NgElementType.Component)
-        .map((component) => ({
-          id: component.id,
-          ...getComponent(component.cls),
-        })),
-    ),
-  );
+  const componentList = context.elements
+    .map((element, id) => ({ ...element, id }))
+    .filter((element) => element.type === NgElementType.Component)
+    .map((component) => getComponent(component.cls));
+
+  respond(res).ok(componentList);
 };
 
 export const GET_directive_list = (
@@ -55,18 +69,12 @@ export const GET_directive_list = (
   res: ServerResponse<IncomingMessage>,
   _server: Server,
 ) => {
-  res.writeHead(200, { "Content-Type": "text/json" });
-  res.end(
-    JSON.stringify(
-      context.elements
-        .map((element, id) => ({ ...element, id }))
-        .filter((element) => element.type === NgElementType.Directive)
-        .map((component) => ({
-          id: component.id,
-          ...getDirective(component.cls),
-        })),
-    ),
-  );
+  const directiveList = context.elements
+    .map((element, id) => ({ ...element, id }))
+    .filter((element) => element.type === NgElementType.Directive)
+    .map((component) => getDirective(component.cls));
+
+  respond(res).ok(directiveList);
 };
 
 export const GET_component = (
@@ -80,19 +88,16 @@ export const GET_component = (
   const element = context.elements.at(id);
 
   if (!element) {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("No element of that ID.");
+    respond(res).notFoundId(id);
     return;
   }
 
   if (element.type !== NgElementType.Component) {
-    res.writeHead(400, { "Content-Type": "text/plain" });
-    res.end(`Element of ID ${id} is not a Component`);
+    respond(res).notOfType({ id, type: NgElementType.Component });
     return;
   }
 
-  res.writeHead(200, { "Content-Type": "text/json" });
-  res.end(JSON.stringify({ id, ...getComponent(element.cls) }));
+  respond(res).ok(getComponent(element.cls));
 };
 
 const getPipe = (cls: ts.ClassDeclaration) => {
@@ -101,49 +106,14 @@ const getPipe = (cls: ts.ClassDeclaration) => {
   if (!meta) throw Error(`Element of is not a directive`);
 
   const owningModule = getOwningNgModule(cls);
-  const declaredIn =
-    owningModule &&
-    context.elements.find((element) => element.cls === owningModule);
 
   return {
+    id: context.elements.findIndex((el) => el.cls === cls),
     type: NgElementType.Pipe,
     name: meta.name,
     className: cls.name?.escapedText,
     standalone: meta.isStandalone,
-    declaredIn,
-  };
-};
-
-const getPipeDep = (
-  reference: Reference<ClassDeclaration>,
-  opts?: { importIn?: ts.ClassDeclaration },
-) => {
-  const cls = reference.node as ts.ClassDeclaration;
-  const meta = getPipeMetadata(cls);
-
-  if (!meta) throw Error(`Element of is not a directive`);
-
-  const owningModule = getOwningNgModule(cls);
-  const declaredIn =
-    owningModule &&
-    context.elements.find((element) => element.cls === owningModule);
-
-  let potentilImports: readonly PotentialImport[] | null = null;
-  if (opts?.importIn) {
-    potentilImports = context.checker.ng.getPotentialImportsFor(
-      reference as Reference<ClassDeclaration>,
-      opts.importIn,
-      PotentialImportMode.Normal,
-    );
-  }
-
-  return {
-    type: NgElementType.Pipe,
-    className: cls.name?.escapedText,
-    declaredIn,
-    name: meta.name,
-    standalone: meta.isStandalone,
-    ...(potentilImports ? { potentilImports } : {}),
+    declaredIn: owningModule && getModule(owningModule),
   };
 };
 
@@ -159,36 +129,88 @@ export const GET_component_dependency_list = (
   const element = context.elements.at(id);
 
   if (!element) {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("No element of that ID.");
+    return respond(res).notFoundId(id);
+  }
+
+  if (element.type !== NgElementType.Component) {
+    return respond(res).notOfType({ id, type: NgElementType.Component });
+  }
+
+  const dependencies = element
+    .dependencies()
+    .map((dep) => {
+      const depCls = dep.node as ts.ClassDeclaration;
+      try {
+        return getDirective(depCls);
+      } catch (e) {
+        /* ignore */
+      }
+      try {
+        return getPipe(depCls);
+      } catch (e) {
+        /* ignore */
+      }
+      return null;
+    })
+    .filter(Boolean);
+
+  respond(res).ok(dependencies);
+};
+
+export const GET_component_consumer_list = (
+  url: URL,
+  _req: IncomingMessage,
+  res: ServerResponse<IncomingMessage>,
+  _server: Server,
+) => {
+  const [_api, _componenet, idString, _consumer] = getPathnameElements(url);
+  const id = Number(idString);
+
+  const element = context.elements.at(id);
+
+  if (!element) {
+    respond(res).notFoundId(id);
     return;
   }
 
   if (element.type !== NgElementType.Component) {
-    res.writeHead(400, { "Content-Type": "text/plain" });
-    res.end(`Element of ID ${id} is not a Component`);
+    respond(res).notOfType({ id, type: NgElementType.Component });
     return;
   }
 
-  const potentialPipes = context.checker.ng.getPotentialPipes(element.cls);
+  const directConsumers = context.elements
+    .filter((el) => el.type === NgElementType.Component)
+    .filter((cp, index, array) => {
+      console.log(
+        `(${index}/${array.length}) analysing ${cp.cls.name?.escapedText}`,
+      );
+      const dependencies = cp.dependencies();
 
-  res.writeHead(200, { "Content-Type": "text/json" });
-  res.end(
-    JSON.stringify({
-      directives:
-        context.checker.ng
-          .getUsedDirectives(element.cls)
-          ?.map((directive) =>
-            getDirective(directive.ref.node as ts.ClassDeclaration),
-          ) ?? [],
-      pipes:
-        context.checker.ng.getUsedPipes(element.cls)?.map((name) => {
-          const pipeUsed = potentialPipes.find(
-            (potentialPipe) => potentialPipe.name === name,
-          );
-          if (!pipeUsed) return null;
-          return getPipe(pipeUsed.ref.node as ts.ClassDeclaration);
-        }) ?? [],
+      const hit = dependencies
+        .map((dep) => dep.node)
+        .includes(element.cls as NamedClassDeclaration);
+
+      if (hit)
+        console.log(
+          `(${index}/${array.length}) ${cp.cls.name?.escapedText} is a HIT!`,
+        );
+
+      return hit;
+    });
+
+  respond(res).ok(
+    directConsumers.map((consumer) => {
+      switch (consumer.type) {
+        case NgElementType.Pipe:
+          return getPipe(consumer.cls);
+        case NgElementType.Component:
+          return getComponent(consumer.cls);
+        case NgElementType.Directive:
+          return getDirective(consumer.cls);
+        case NgElementType.NgModule:
+          // Should not happen really
+          return getModule(consumer.cls);
+      }
     }),
   );
 };
@@ -199,15 +221,6 @@ export const GET_component_dependency = (
   res: ServerResponse<IncomingMessage>,
   _server: Server,
 ) => {
-  const throwHttp = (code: number, message: string) => {
-    res.writeHead(code, { "Content-Type": "text/plain" });
-    res.end(message);
-  };
-  const throwNoElementOfId = (id: number) =>
-    throwHttp(404, `No element with id: ${id}`);
-  const throwElementIsNotOfType = (id: number, type: string) =>
-    throwHttp(404, `Element of ID ${id} is not a ${type}`);
-
   const [_api, _componenetId, idString, _dependency, depIdString] =
     getPathnameElements(url);
   const componentId = Number(idString);
@@ -216,12 +229,15 @@ export const GET_component_dependency = (
   const component = context.elements.at(componentId);
   const dep = context.elements.at(depId);
 
-  if (!component) return throwNoElementOfId(componentId);
+  if (!component) return respond(res).notFoundId(componentId);
 
   if (component.type !== NgElementType.Component)
-    return throwElementIsNotOfType(componentId, "Component");
+    return respond(res).notOfType({
+      id: componentId,
+      type: NgElementType.Component,
+    });
 
-  if (!dep) return throwNoElementOfId(depId);
+  if (!dep) return respond(res).notFoundId(depId);
 
   const templateDependencyTypes = [
     NgElementType.Component,
@@ -229,20 +245,18 @@ export const GET_component_dependency = (
     NgElementType.Pipe,
   ];
   if (templateDependencyTypes.includes(dep.type))
-    return throwElementIsNotOfType(
-      componentId,
-      templateDependencyTypes.join(", "),
-    );
-
-  res.writeHead(200, { "Content-Type": "text/json" });
+    return respond(res).notOfType({
+      id: depId,
+      type: templateDependencyTypes.join(", "),
+    });
 
   if (
     dep.type === NgElementType.Component ||
     dep.type === NgElementType.Directive
   ) {
-    res.end(JSON.stringify(getDirective(dep.cls)));
+    respond(res).ok(getDirective(dep.cls));
   } else {
-    res.end(JSON.stringify(getPipe(dep.cls)));
+    respond(res).ok(getPipe(dep.cls));
   }
 };
 
@@ -260,10 +274,7 @@ const getPipeMetadata = (cls: ts.ClassDeclaration) =>
 const getOwningNgModule = (cls: ts.ClassDeclaration) =>
   context.checker.ng.getOwningNgModule(cls);
 
-const getDirective = (
-  cls: ts.ClassDeclaration,
-  opts?: { importIn: ts.ClassDeclaration },
-) => {
+const getDirective = (cls: ts.ClassDeclaration) => {
   const meta = getDirectiveMetadata(cls);
 
   if (!meta) throw Error(`Element of is not a directive`);
@@ -273,43 +284,17 @@ const getDirective = (
     owningModule &&
     context.elements.find((element) => element.cls === owningModule);
 
-  // let potentilImports: readonly PotentialImport[] | null = null;
-  // if (opts?.importIn) {
-  //   potentilImports = context.checker.ng.getPotentialImportsFor(
-  //     reference as Reference<ClassDeclaration>,
-  //     opts.importIn,
-  //     PotentialImportMode.Normal,
-  //   );
-  // }
-
   const directive = {
+    id: context.elements.findIndex((el) => el.cls === cls),
     name: cls.name?.escapedText,
     type: meta.isComponent ? NgElementType.Component : NgElementType.Directive,
     selector: meta?.selector,
     standalone: meta?.isStandalone,
-    declaredIn: declaredIn?.cls.name?.escapedText,
+    declaredIn: declaredIn?.cls && getModule(declaredIn.cls),
   };
-
-  console.log(directive);
 
   return directive;
 };
-
-// const getTemplateDependencies = (cls: ts.ClassDeclaration) => {
-//   const usedDirectives =
-//     context.checker.ng
-//       .getUsedDirectives(cls)
-//       ?.map((directive) =>
-//         getDirective(directive.ref.node as ts.ClassDeclaration),
-//       ) ?? [];
-//
-//   // const usedPipes =
-//   //   context.checker.ng
-//   //     .getUsedPipes(cls)
-//   //     ?.map((pipe) =>
-//   //       getPipe(directive.ref.node as ts.ClassDeclaration),
-//   //     ) ?? [];
-// };
 
 const getComponent = (cls: ts.ClassDeclaration) => {
   const directive = getDirective(cls);
@@ -318,4 +303,18 @@ const getComponent = (cls: ts.ClassDeclaration) => {
     throw Error(`Element of is not a component`);
 
   return directive;
+};
+
+const getModule = (cls: ts.ClassDeclaration) => {
+  const meta = context.checker.ng.getNgModuleMetadata(cls);
+
+  if (!meta) throw Error(`Element "${cls.name?.escapedText}" is not a module.`);
+
+  const module = {
+    id: context.elements.findIndex((el) => el.cls === cls),
+    name: cls.name?.escapedText,
+    type: NgElementType.NgModule,
+  };
+
+  return module;
 };

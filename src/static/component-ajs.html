@@ -24,11 +24,11 @@
   </style>
 </head>
 <body>
-  <div x-data="{ id: searchParam('id') }">
-    <div
-      x-data="{ component: null }"
-      x-init="load(`/api/component/${id}`).to($data, 'component')"
-    >
+  <div
+    x-data="{ id: searchParam('id'), component: null }"
+    x-init="loadJSON(`/api/component/${id}`).then(set($data, 'component'))"
+  >
+    <div>
       <template x-if="component">
         <div>
           <h3 x-template>${component.name}</h3>
@@ -43,7 +43,7 @@
               <li x-template>standalone: ${component.standalone}</li>
             </template>
             <template x-if="component.declaredIn">
-              <li x-template>declared in: ${component.declaredIn}</li>
+              <li x-template>declared in: ${component.declaredIn.name}</li>
             </template>
           </ul>
         </div>
@@ -54,40 +54,22 @@
     </div>
 
     <div
-      x-data="{ data: {}, tree: null }"
-      x-init="load(`/api/component/${id}/dependecy`).to($data, 'data').then(_ => $data.tree = createDependencyTree(_.json))"
+      x-data="{ data: [], tree: null }"
+      x-init="loadJSON(`/api/component/${id}/dependency`).then(set($data, 'data'))"
+      x-effect="data?.length && component.id && set($data, 'tree')(createDependencyTreeNodes(component, data))"
     >
       <details>
-        <summary x-template>
-          Used directives (${data.directives?.length})
-        </summary>
+        <summary x-template>Template dependecies (${data?.length})</summary>
 
         <ul>
-          <template x-for="d in data.directives">
+          <template x-for="d in data">
             <li>
               <span x-html="d.name"></span>
               <template x-if="d.standalone">
                 <span>(standalone)</span>
               </template>
               <template x-if="d.declaredIn">
-                <span>(<span x-html="d.declaredIn"></span>)</span>
-              </template>
-            </li>
-          </template>
-        </ul>
-      </details>
-
-      <details>
-        <summary x-template>Used pipes (${data.pipes?.length})</summary>
-        <ul>
-          <template x-for="d in data.pipes">
-            <li>
-              <span x-html="d.name"></span>
-              <template x-if="d.standalone">
-                <span>(standalone)</span>
-              </template>
-              <template x-if="d.declaredIn">
-                <span>(<span x-html="d.declaredIn"></span>)</span>
+                <span>(<span x-html="d.declaredIn.name"></span>)</span>
               </template>
             </li>
           </template>
@@ -95,76 +77,85 @@
       </details>
 
       <template x-if="tree">
-        <my-chart :data="JSON.stringify(tree)"></my-chart>
+        <my-chart
+          :data="JSON.stringify(tree)"
+          @node-super-click="expandDependencyTree($event.detail, $data)"
+        ></my-chart>
       </template>
     </div>
   </div>
 
   <script>
+    // alpine.js utils
     function searchParam(name) {
       return new URLSearchParams(document.location.search).get(name);
     }
 
-    function load(url) {
-      return {
-        to(data, key) {
-          return fetch(url)
-            .then((_) => _.json())
-            .then((json) => {
-              data[key] = json;
+    function loadJSON(url) {
+      return fetch(url).then((_) => _.json());
+    }
 
-              return { data, key, json };
-            });
-        },
+    function set(obj, propertyName) {
+      return (data) => {
+        obj[propertyName] = data;
+        return data;
       };
     }
 
-    // /**
-    //  * @typedef Dependency
-    //  * @type object
-    //  *
-    //  * @property {string} declaredIn
-    //  * @property {string} name
-    //  */
-    //
-    // /**
-    //  * @typedef DependencyTreeNode
-    //  * @type object
-    //  *
-    //  * @property {string} name
-    //  * @property {DependencyTreeNode} children
-    //  */
-    //
-    // /**
-    //  *
-    //  * @param {object} data
-    //  * @param {Dependency[]} data.directives
-    //  * @param {Dependency[]} data.pipes
-    //  */
-    function createDependencyTree(data) {
-      const deps = [...data.directives, ...data.pipes];
-      const byModules = deps.reduce((acc, curr) => {
-        const declaredIn = curr.declaredIn ?? "standalone";
+    // dependency tree helpers
+    function randomId() {
+      return Math.random().toString().slice(2);
+    }
 
-        if (!acc[declaredIn]) acc[declaredIn] = [];
+    function createDependencyTreeNodes(root, data) {
+      const deps = [...data];
 
-        acc[declaredIn].push(curr);
+      const modules = [];
 
-        return acc;
-      }, {});
-      console.log("bob2");
-      const modules = Object.keys(byModules);
+      const standaloneModule = {
+        id: randomId(),
+        parentId: root.id,
+        name: "standalone",
+      };
 
-      const nodes = modules.map((module) => ({
-        name: module,
-        children: byModules[module].map((_) => ({
-          name: _.name,
-          children: [],
-        })),
-      }));
-      console.log(nodes);
+      deps.forEach((d) => {
+        if (d.id === -1) {
+          d.id = randomId();
+        }
 
-      return { name: "ROOT", children: nodes };
+        if (d.declaredIn) {
+          d.parentId = d.declaredIn.id;
+        } else {
+          if (!modules.find((_) => _.id === standaloneModule.id))
+            modules.push(standaloneModule);
+
+          d.parentId = standaloneModule.id;
+        }
+
+        if (!d.declaredIn || modules.find((m) => m.id === d.declaredIn.id))
+          return;
+        modules.push({ ...d.declaredIn, parentId: root.id });
+      });
+
+      return [root, ...deps, ...modules];
+    }
+
+    async function expandDependencyTree(event, data) {
+      try {
+        const depsResponse = await fetch(
+          `/api/component/${event.id}/dependency`,
+        );
+        const responseData = await depsResponse.json();
+
+        if (!depsResponse.ok) throw new Error(JSON.stringify(responseData));
+
+        const subTree = createDependencyTreeNodes(event, responseData).filter(
+          (_) => _.id !== event.id,
+        );
+        data.tree.push(...subTree);
+      } catch (e) {
+        alert(e);
+      }
     }
 
     document.addEventListener("alpine:init", () => {

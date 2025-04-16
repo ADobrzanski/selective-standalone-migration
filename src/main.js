@@ -1357,45 +1357,65 @@ function findLiteralProperty2(literal, name) {
 }
 
 // src/routes/api.ts
+var respond = (res) => {
+  return {
+    with(opts) {
+      if (typeof opts.data === "string") {
+        res.writeHead(opts.code, { "Content-Type": "text/plain" });
+        res.end(opts.data);
+      } else {
+        res.writeHead(opts.code, { "Content-Type": "text/json" });
+        res.end(JSON.stringify(opts.data));
+      }
+    },
+    ok(data) {
+      return this.with({ data, code: 200 });
+    },
+    notFoundId(id) {
+      return this.with({
+        data: { details: `No element with ID equal ${id}.` },
+        code: 404
+      });
+    },
+    notOfType(opts) {
+      return this.with({
+        code: 404,
+        data: {
+          details: `Element with ID equal ${opts.id} is not ${opts.type}.`
+        }
+      });
+    }
+  };
+};
 var GET_component_list = (_url, _req, res, _server) => {
-  res.writeHead(200, { "Content-Type": "text/json" });
-  res.end(
-    JSON.stringify(
-      context.elements.map((element, id) => ({ ...element, id })).filter((element) => element.type === "Component" /* Component */).map((component) => ({
-        id: component.id,
-        ...getComponent(component.cls)
-      }))
-    )
-  );
+  const componentList = context.elements.map((element, id) => ({ ...element, id })).filter((element) => element.type === "Component" /* Component */).map((component) => getComponent(component.cls));
+  respond(res).ok(componentList);
 };
 var GET_component = (url, _req, res, _server) => {
   const [_0, _path, idString] = getPathnameElements(url);
   const id = Number(idString);
   const element = context.elements.at(id);
   if (!element) {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("No element of that ID.");
+    respond(res).notFoundId(id);
     return;
   }
   if (element.type !== "Component" /* Component */) {
-    res.writeHead(400, { "Content-Type": "text/plain" });
-    res.end(`Element of ID ${id} is not a Component`);
+    respond(res).notOfType({ id, type: "Component" /* Component */ });
     return;
   }
-  res.writeHead(200, { "Content-Type": "text/json" });
-  res.end(JSON.stringify({ id, ...getComponent(element.cls) }));
+  respond(res).ok(getComponent(element.cls));
 };
 var getPipe = (cls) => {
   const meta = getPipeMetadata(cls);
   if (!meta) throw Error(`Element of is not a directive`);
   const owningModule = getOwningNgModule(cls);
-  const declaredIn = owningModule && context.elements.find((element) => element.cls === owningModule);
   return {
+    id: context.elements.findIndex((el) => el.cls === cls),
     type: "Pipe" /* Pipe */,
     name: meta.name,
     className: cls.name?.escapedText,
     standalone: meta.isStandalone,
-    declaredIn
+    declaredIn: owningModule && getModule(owningModule)
   };
 };
 var GET_component_dependency_list = (url, _req, res, _server) => {
@@ -1403,63 +1423,91 @@ var GET_component_dependency_list = (url, _req, res, _server) => {
   const id = Number(idString);
   const element = context.elements.at(id);
   if (!element) {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("No element of that ID.");
+    return respond(res).notFoundId(id);
+  }
+  if (element.type !== "Component" /* Component */) {
+    return respond(res).notOfType({ id, type: "Component" /* Component */ });
+  }
+  const dependencies = element.dependencies().map((dep) => {
+    const depCls = dep.node;
+    try {
+      return getDirective(depCls);
+    } catch (e) {
+    }
+    try {
+      return getPipe(depCls);
+    } catch (e) {
+    }
+    return null;
+  }).filter(Boolean);
+  respond(res).ok(dependencies);
+};
+var GET_component_consumer_list = (url, _req, res, _server) => {
+  const [_api, _componenet, idString, _consumer] = getPathnameElements(url);
+  const id = Number(idString);
+  const element = context.elements.at(id);
+  if (!element) {
+    respond(res).notFoundId(id);
     return;
   }
   if (element.type !== "Component" /* Component */) {
-    res.writeHead(400, { "Content-Type": "text/plain" });
-    res.end(`Element of ID ${id} is not a Component`);
+    respond(res).notOfType({ id, type: "Component" /* Component */ });
     return;
   }
-  const potentialPipes = context.checker.ng.getPotentialPipes(element.cls);
-  res.writeHead(200, { "Content-Type": "text/json" });
-  res.end(
-    JSON.stringify({
-      directives: context.checker.ng.getUsedDirectives(element.cls)?.map(
-        (directive) => getDirective(directive.ref.node)
-      ) ?? [],
-      pipes: context.checker.ng.getUsedPipes(element.cls)?.map((name) => {
-        const pipeUsed = potentialPipes.find(
-          (potentialPipe) => potentialPipe.name === name
-        );
-        if (!pipeUsed) return null;
-        return getPipe(pipeUsed.ref.node);
-      }) ?? []
+  const directConsumers = context.elements.filter((el) => el.type === "Component" /* Component */).filter((cp, index, array) => {
+    console.log(
+      `(${index}/${array.length}) analysing ${cp.cls.name?.escapedText}`
+    );
+    const dependencies = cp.dependencies();
+    const hit = dependencies.map((dep) => dep.node).includes(element.cls);
+    if (hit)
+      console.log(
+        `(${index}/${array.length}) ${cp.cls.name?.escapedText} is a HIT!`
+      );
+    return hit;
+  });
+  respond(res).ok(
+    directConsumers.map((consumer) => {
+      switch (consumer.type) {
+        case "Pipe" /* Pipe */:
+          return getPipe(consumer.cls);
+        case "Component" /* Component */:
+          return getComponent(consumer.cls);
+        case "Directive" /* Directive */:
+          return getDirective(consumer.cls);
+        case "NgModule" /* NgModule */:
+          return getModule(consumer.cls);
+      }
     })
   );
 };
 var GET_component_dependency = (url, _req, res, _server) => {
-  const throwHttp = (code, message) => {
-    res.writeHead(code, { "Content-Type": "text/plain" });
-    res.end(message);
-  };
-  const throwNoElementOfId = (id) => throwHttp(404, `No element with id: ${id}`);
-  const throwElementIsNotOfType = (id, type) => throwHttp(404, `Element of ID ${id} is not a ${type}`);
   const [_api, _componenetId, idString, _dependency, depIdString] = getPathnameElements(url);
   const componentId = Number(idString);
   const depId = Number(depIdString);
   const component = context.elements.at(componentId);
   const dep = context.elements.at(depId);
-  if (!component) return throwNoElementOfId(componentId);
+  if (!component) return respond(res).notFoundId(componentId);
   if (component.type !== "Component" /* Component */)
-    return throwElementIsNotOfType(componentId, "Component");
-  if (!dep) return throwNoElementOfId(depId);
+    return respond(res).notOfType({
+      id: componentId,
+      type: "Component" /* Component */
+    });
+  if (!dep) return respond(res).notFoundId(depId);
   const templateDependencyTypes = [
     "Component" /* Component */,
     "Directive" /* Directive */,
     "Pipe" /* Pipe */
   ];
   if (templateDependencyTypes.includes(dep.type))
-    return throwElementIsNotOfType(
-      componentId,
-      templateDependencyTypes.join(", ")
-    );
-  res.writeHead(200, { "Content-Type": "text/json" });
+    return respond(res).notOfType({
+      id: depId,
+      type: templateDependencyTypes.join(", ")
+    });
   if (dep.type === "Component" /* Component */ || dep.type === "Directive" /* Directive */) {
-    res.end(JSON.stringify(getDirective(dep.cls)));
+    respond(res).ok(getDirective(dep.cls));
   } else {
-    res.end(JSON.stringify(getPipe(dep.cls)));
+    respond(res).ok(getPipe(dep.cls));
   }
 };
 var getPathnameElements = (url) => {
@@ -1468,19 +1516,19 @@ var getPathnameElements = (url) => {
 var getDirectiveMetadata = (cls) => context.checker.ng.getDirectiveMetadata(cls);
 var getPipeMetadata = (cls) => context.checker.ng.getPipeMetadata(cls);
 var getOwningNgModule = (cls) => context.checker.ng.getOwningNgModule(cls);
-var getDirective = (cls, opts) => {
+var getDirective = (cls) => {
   const meta = getDirectiveMetadata(cls);
   if (!meta) throw Error(`Element of is not a directive`);
   const owningModule = getOwningNgModule(cls);
   const declaredIn = owningModule && context.elements.find((element) => element.cls === owningModule);
   const directive = {
+    id: context.elements.findIndex((el) => el.cls === cls),
     name: cls.name?.escapedText,
     type: meta.isComponent ? "Component" /* Component */ : "Directive" /* Directive */,
     selector: meta?.selector,
     standalone: meta?.isStandalone,
-    declaredIn: declaredIn?.cls.name?.escapedText
+    declaredIn: declaredIn?.cls && getModule(declaredIn.cls)
   };
-  console.log(directive);
   return directive;
 };
 var getComponent = (cls) => {
@@ -1488,6 +1536,16 @@ var getComponent = (cls) => {
   if (directive.type !== "Component" /* Component */)
     throw Error(`Element of is not a component`);
   return directive;
+};
+var getModule = (cls) => {
+  const meta = context.checker.ng.getNgModuleMetadata(cls);
+  if (!meta) throw Error(`Element "${cls.name?.escapedText}" is not a module.`);
+  const module2 = {
+    id: context.elements.findIndex((el) => el.cls === cls),
+    name: cls.name?.escapedText,
+    type: "NgModule" /* NgModule */
+  };
+  return module2;
 };
 
 // src/routes/components.ts
@@ -1574,6 +1632,10 @@ async function analyseDependencies(data) {
       handler: GET_component_dependency_list
     },
     {
+      path: ["api", "component", anyPattern, "consumer"],
+      handler: GET_component_consumer_list
+    },
+    {
       path: ["api", "component", anyPattern, "dependency", anyPattern],
       handler: GET_component_dependency
     },
@@ -1606,13 +1668,14 @@ async function analyseDependencies(data) {
       if (route.path.length !== pathnameSegments.length) return false;
       for (let idx in pathnameSegments) {
         if (isNil(route.path[idx])) return false;
-        if (typeof route.path[idx] === "string") {
-          return route.path[idx] === pathnameSegments[idx];
+        if (typeof route.path[idx] === "string" && route.path[idx] !== pathnameSegments[idx]) {
+          return false;
         }
-        if (route.path[idx] instanceof RegExp) {
-          return pathnameSegments[idx].match(route.path[idx]);
+        if (route.path[idx] instanceof RegExp && !pathnameSegments[idx].match(route.path[idx])) {
+          return false;
         }
       }
+      return true;
     });
     if (matchingRoute) {
       matchingRoute.handler(url, req, res, server, context);
@@ -1682,7 +1745,16 @@ function findNgClasses(sourceFile, typeChecker) {
       modules.push({
         cls: node,
         decorator: ngDecorator,
-        type: ngDecorator.name
+        type: ngDecorator.name,
+        dependencies() {
+          if (!this.__templateDependencies) {
+            this.__templateDependencies = findTemplateDependencies(
+              this.cls,
+              context.checker.ng
+            );
+          }
+          return this.__templateDependencies;
+        }
       });
     }
     node.forEachChild(walk);
