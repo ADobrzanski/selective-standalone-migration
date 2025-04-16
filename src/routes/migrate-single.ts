@@ -30,6 +30,7 @@ import { NgElementType } from "../types/ng-element.enum";
 import { NamedClassDeclaration } from "../angular-tsc.helpers";
 import { relative, dirname } from "path";
 import * as fs from "fs";
+import { isClassImported } from "./migrate-single/utils";
 
 /**
  * Function that can be used to prcess the dependencies that
@@ -301,12 +302,25 @@ function importNewStandaloneInConsumers(data: {
 
   for (let importTarget of toUpdate) {
     if (!importTarget || !decl.name?.text) continue;
-    // TODO: check for exising import; only add if missing
-    tracker.addImport(
-      importTarget.getSourceFile(),
-      decl.name.text,
-      relative(context.basePath, decl.getSourceFile().fileName),
-    );
+
+    // if the file does not already import class
+    if (
+      !isClassImported({
+        classDeclaration: decl,
+        sourceFile: importTarget.getSourceFile(),
+        typeChecker: context.checker.ts,
+      })
+    ) {
+      // add import (using project-scoped absolute path)
+      tracker.addImport(
+        importTarget.getSourceFile(),
+        decl.name.text,
+        // drop '.ts' extension from final import path
+        relative(context.basePath, decl.getSourceFile().fileName).slice(0, -3),
+      );
+    }
+
+    // reference class inside `imports` of module or standalone component
     addImportToModuleLike({ import: decl, to: importTarget, tracker });
   }
 }
@@ -366,7 +380,7 @@ function getAllXmlTags(xmlString: string): string[] {
   }
 }
 
-function readFileAsString(absolutePath) {
+function readFileAsString(absolutePath: fs.PathOrFileDescriptor) {
   try {
     const data = fs.readFileSync(absolutePath, "utf8");
     return data;
