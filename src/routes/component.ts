@@ -10,6 +10,7 @@ import {
   div,
   getDocument,
   renderComponentListItemEntry,
+  renderDirectiveListItemEntry,
 } from "../html.helpers";
 import ts from "typescript";
 import { NgElement } from "../types/ng-element.enum";
@@ -65,6 +66,16 @@ export const handleComponent = (
       .map((directive) => {
         const declaration = directive.ref.node;
         return renderComponentListItemEntry(
+          declaration as ts.ClassDeclaration,
+          context.checker.ng,
+        );
+      }),
+    div(null, "Used directives:"),
+    ...usedDirectives
+      .filter((directive) => !directive.isComponent)
+      .map((directive) => {
+        const declaration = directive.ref.node;
+        return renderDirectiveListItemEntry(
           declaration as ts.ClassDeclaration,
           context.checker.ng,
         );

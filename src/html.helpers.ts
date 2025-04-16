@@ -64,3 +64,15 @@ export const renderComponentListItemEntry = (
     `- ${declaration.name?.escapedText} (${ngChecker.getOwningNgModule(declaration)?.name?.escapedText})`,
   );
 };
+
+export const renderDirectiveListItemEntry = (
+  declaration: ts.ClassDeclaration,
+  ngChecker: TemplateTypeChecker,
+) => {
+  const owningModule = ngChecker.getOwningNgModule(declaration);
+  const owningModuleName = owningModule
+    ? (owningModule.name?.escapedText ?? "missing moudle name")
+    : "standalone";
+
+  return div(null, `- ${declaration.name?.escapedText} (${owningModuleName})`);
+};
