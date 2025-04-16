@@ -25,6 +25,7 @@ import {
   GET_component_dependency,
   GET_component_list,
   GET_component_consumer_list,
+  GET_directive_list,
 } from "./routes/api";
 import { Tree } from "@angular-devkit/schematics";
 import { handleComponents } from "./routes/components";
@@ -152,6 +153,7 @@ async function analyseDependencies(data) {
     { path: [""], handler: handleFile },
     { path: ["file", anyPattern], handler: handleFile },
     { path: ["api", "component"], handler: GET_component_list },
+    { path: ["api", "directive"], handler: GET_directive_list },
     { path: ["api", "component", anyPattern], handler: GET_component },
     {
       path: ["api", "component", anyPattern, "dependency"],

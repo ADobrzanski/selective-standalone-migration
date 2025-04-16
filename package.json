@@ -11,7 +11,8 @@
   "dependencies": {
     "@angular-devkit/core": "^18.2.15",
     "@angular-devkit/schematics": "^18.2.15",
-    "@angular/compiler-cli": "^18.0.1"
+    "@angular/compiler-cli": "^18.0.1",
+    "fast-xml-parser": "^5.2.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

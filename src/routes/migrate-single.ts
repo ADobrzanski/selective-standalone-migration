@@ -13,6 +13,7 @@ import {
   type TemplateTypeChecker,
 } from "@angular/compiler-cli/private/migrations";
 import ts from "typescript";
+import { XMLParser } from "fast-xml-parser";
 
 import { ChangeTracker, ImportRemapper } from "../../utils/change_tracker";
 import { getAngularDecorators, NgDecorator } from "../../utils/ng_decorators";
@@ -22,13 +23,13 @@ import { ScriptContext, context } from "../main";
 import {
   getDataFromGlobalNodeId,
   getGlobalNodeId,
-  getImportSpecifier,
   isSourceFile,
 } from "../tsc.helpers";
 import { getAtPath } from "../helpers";
 import { NgElementType } from "../types/ng-element.enum";
 import { NamedClassDeclaration } from "../angular-tsc.helpers";
-import { relative } from "path";
+import { relative, dirname } from "path";
+import * as fs from "fs";
 
 /**
  * Function that can be used to prcess the dependencies that
@@ -174,7 +175,7 @@ export function toStandalone(
   // );
   const pendingChanges = tracker.recordChanges();
 
-  console.log(pendingChanges);
+  // console.log(pendingChanges);
 
   for (const [file, changes] of pendingChanges.entries()) {
     const update = tree.beginUpdate(relative(process.cwd(), file.fileName));
@@ -264,25 +265,25 @@ function importNewStandaloneInConsumers(data: {
   importRemapper?: DeclarationImportsRemapper;
 }): void {
   const { toMigrate: decl, tracker } = data;
+  const toMigrateMeta = context.checker.ng.getDirectiveMetadata(decl);
+  if (!toMigrateMeta) return;
+
+  const selectorToMigrate = toMigrateMeta.selector;
+  if (!selectorToMigrate) return;
 
   const directConsumers = context.elements
-    .filter((el) => el.type === NgElementType.Component)
-    .filter((cp, index, array) => {
-      console.log(
-        `(${index}/${array.length}) analysing ${cp.cls.name?.escapedText}`,
-      );
+    .filter((el) => {
+      if (el.type !== NgElementType.Component) return false;
+      console.log("checking", el.cls.name?.getText());
 
-      const dependencies = cp.dependencies();
+      const template = getTemplateOrNull(el.decorator.node);
+      if (!template) return null;
 
-      const hit = dependencies
-        .map((dep) => dep.node)
-        .includes(decl as NamedClassDeclaration);
+      // naive method, will not handle complex selectors
+      const tags = getAllXmlTags(template);
+      const hit = tags.includes(selectorToMigrate);
 
-      if (hit)
-        console.log(
-          `(${index}/${array.length}) ${cp.cls.name?.escapedText} is a HIT!`,
-        );
-
+      if (hit) console.log("HIT!");
       return hit;
     })
     .map((consumer) => ({
@@ -300,12 +301,78 @@ function importNewStandaloneInConsumers(data: {
 
   for (let importTarget of toUpdate) {
     if (!importTarget || !decl.name?.text) continue;
+    // TODO: check for exising import; only add if missing
     tracker.addImport(
       importTarget.getSourceFile(),
       decl.name.text,
       relative(context.basePath, decl.getSourceFile().fileName),
     );
     addImportToModuleLike({ import: decl, to: importTarget, tracker });
+  }
+}
+
+function getTemplateOrNull(decorator: ts.Decorator): string | null {
+  const templateUrl = getTemplateUrlOrNull(decorator);
+  const componentDirectory = dirname(decorator.getSourceFile().fileName);
+
+  if (!templateUrl) return null;
+
+  const relativeTemplateUrl = relative(
+    process.cwd(),
+    `${componentDirectory}/${templateUrl}`,
+  );
+
+  return readFileAsString(relativeTemplateUrl);
+}
+
+function getTemplateUrlOrNull(decorator: ts.Decorator): string | null {
+  const metadata = extractMetadataLiteral(decorator);
+  if (!metadata) return null;
+
+  const templateUrlLiteral = findLiteralProperty(metadata, "templateUrl");
+  if (!templateUrlLiteral) return null;
+  if (!ts.isPropertyAssignment(templateUrlLiteral)) return null;
+
+  let relativeTemplateUrl = templateUrlLiteral.initializer.getText();
+  if (!relativeTemplateUrl) return null;
+
+  // we assume `getText()` returns the path wrapped in "/'/` (eg. `"./some.component.html"`)
+  // so we unwrap it
+  return relativeTemplateUrl.slice(1, -1);
+}
+
+function getAllXmlTags(xmlString: string): string[] {
+  const parser = new XMLParser();
+  try {
+    const xmlDoc = parser.parse(xmlString);
+    const tagNames: string[] = [];
+
+    function traverse(obj: any) {
+      if (typeof obj === "object" && obj !== null) {
+        for (const key in obj) {
+          if (obj.hasOwnProperty(key)) {
+            tagNames.push(key);
+            traverse(obj[key]);
+          }
+        }
+      }
+    }
+
+    traverse(xmlDoc);
+    return [...new Set(tagNames)]; // Remove duplicates
+  } catch (error) {
+    console.error("XML Parsing Error:", error);
+    return [];
+  }
+}
+
+function readFileAsString(absolutePath) {
+  try {
+    const data = fs.readFileSync(absolutePath, "utf8");
+    return data;
+  } catch (err) {
+    console.error("Error reading file:", err);
+    return null;
   }
 }
 
