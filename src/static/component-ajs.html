@@ -33,9 +33,16 @@
         <div>
           <h3 x-template>${component.name}</h3>
           <template x-if="!component.standalone">
-            <button @click="fetch(`/api/component/${id}/$makeStandalone`)">
-              Make standalone
-            </button>
+            <div>
+              <button @click="fetch(`/api/component/${id}/$makeStandalone`)">
+                Make standalone
+              </button>
+              <button
+                @click="fetch(`/api/component/${id}/$makeStandalone?force=true`)"
+              >
+                Make standalone (force)
+              </button>
+            </div>
           </template>
           <ul>
             <li x-template>selector: ${component.selector}</li>

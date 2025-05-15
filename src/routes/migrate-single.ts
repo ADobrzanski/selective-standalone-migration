@@ -12,7 +12,7 @@ import {
   type Reference,
   type TemplateTypeChecker,
 } from "@angular/compiler-cli/private/migrations";
-import ts from "typescript";
+import ts, { Expression, TypeChecker } from "typescript";
 import { XMLParser } from "fast-xml-parser";
 
 import { ChangeTracker, ImportRemapper } from "../../utils/change_tracker";
@@ -42,7 +42,12 @@ export const toStandaloneRoute: FastifyPluginAsync = async (
   _options: FastifyPluginOptions,
 ) => {
   fastify.get("/component/:id/$makeStandalone", async (request, reply) => {
-    const id = Number((request.params as Record<string, string>).id);
+    const query = request.query as Record<string, string | undefined>;
+    const params = request.params as Record<string, string>;
+
+    const id = Number(params.id);
+    const force = query.force?.toLowerCase() === "true";
+
     const component = context.elements.at(id);
 
     if (!component) {
@@ -61,13 +66,17 @@ export const toStandaloneRoute: FastifyPluginAsync = async (
       classDeclaration: component.cls,
       templateTypeChecker: context.checker.ng,
     });
-    if (migrationIssues) {
+    if (migrationIssues && !force) {
       reply.status(409).send(migrationIssues);
       return;
     }
 
     console.log("about to migrate");
-    toStandalone(component.cls, context, printer);
+    const dependencies = getSameModuleDependenciesDeep({
+      classDeclaration: component.cls,
+      templateTypeChecker: context.checker.ng,
+    });
+    toStandalone([component.cls, ...dependencies], context, printer);
 
     context.server.shut();
 
@@ -111,6 +120,41 @@ function findMigrationBlockers(data: {
     consumers: sameModuleConsumers.map((_) => _.cls.name?.text),
     dependencies: sameModuleDependencies.map((_) => _.name.text),
   };
+}
+
+function getAllConsumers(data: {
+  classDeclaration: ts.ClassDeclaration;
+  templateTypeChecker: TemplateTypeChecker;
+}) {
+  const { classDeclaration, templateTypeChecker } = data;
+
+  const selector =
+    templateTypeChecker.getDirectiveMetadata(classDeclaration)?.selector;
+
+  if (!selector)
+    throw Error(
+      "Cannot check templates for usage if component has no selector.",
+    );
+
+  const allConsumers = context.elements.filter((potentialConsumer) => {
+    // only components have templates
+    if (potentialConsumer.type !== NgElementType.Component) return false;
+
+    const potentialConsumerOwningModule = templateTypeChecker.getOwningNgModule(
+      potentialConsumer.cls,
+    );
+    // disregard standalone components
+    if (!potentialConsumerOwningModule) return false;
+
+    const template = getTemplateOrNull(potentialConsumer.decorator.node);
+    if (!template) return false;
+
+    // check if template includes tag matching component's selector
+    // WARNING: naive method, will not handle complex selectors
+    return getAllXmlTags(template).includes(selector);
+  });
+
+  return allConsumers;
 }
 
 function getSameModuleConsumers(data: {
@@ -202,7 +246,7 @@ function getSameModuleDependencies(data: {
  */
 export function toStandalone(
   // sourceFiles: ts.SourceFile[],
-  toMigrate: ts.ClassDeclaration,
+  toMigrate: ts.ClassDeclaration[],
   // program: NgtscProgram,
   context: ScriptContext,
   printer: ts.Printer,
@@ -240,17 +284,19 @@ export function toStandalone(
   //   testObjects.forEach((obj) => testObjectsToMigrate.add(obj));
   // }
 
-  // for (const declaration of declarations) {
-  convertNgModuleDeclarationToStandalone(
-    toMigrate,
-    declarations,
-    tracker,
-    templateTypeChecker,
-    declarationImportRemapper,
-  );
-  // }
+  for (const declaration of toMigrate) {
+    convertNgModuleDeclarationToStandalone(
+      declaration,
+      new Set(toMigrate),
+      tracker,
+      templateTypeChecker,
+      declarationImportRemapper,
+    );
+  }
 
-  importNewStandaloneInConsumers({ toMigrate, tracker });
+  migrateOwningModule({ toMigrate, templateTypeChecker, typeChecker, tracker });
+
+  importNewStandaloneInConsumers({ toMigrate, tracker, templateTypeChecker });
 
   // for (const node of modulesToMigrate) {
   //   migrateNgModuleClass(node, declarations, tracker, typeChecker, templateTypeChecker);
@@ -342,6 +388,258 @@ function convertNgModuleDeclarationToStandalone(
   }
 }
 
+function migrateOwningModule(data: {
+  toMigrate: ts.ClassDeclaration[];
+  templateTypeChecker: TemplateTypeChecker;
+  typeChecker: TypeChecker;
+  tracker: ChangeTracker;
+}): void {
+  const module = data.templateTypeChecker.getOwningNgModule(data.toMigrate[0])!;
+
+  const decorator = data.templateTypeChecker.getPrimaryAngularDecorator(module);
+  if (!decorator) return;
+
+  const metadata = extractMetadataLiteral(decorator);
+  if (!metadata) return;
+
+  const declarations = findLiteralProperty(metadata, "declarations");
+  if (!declarations) return;
+
+  const declarationsOutsideDecorator: ts.Identifier[] = [];
+
+  data.toMigrate.forEach((declToMigrate) => {
+    const identifier = findIdentifierInCollectionNaively({
+      array: declarations,
+      // expect component to be named class
+      identifierToFind: declToMigrate.name!.text,
+      typeChecker: data.typeChecker,
+    });
+
+    /* couldn't find identifier; won't migrate */
+    if (!identifier) return;
+
+    if (!isNodeWithinAnother({ node: identifier, within: declarations })) {
+      declarationsOutsideDecorator.push(identifier);
+    }
+  });
+
+  let updatedDecoratorProperties: ts.ObjectLiteralElementLike[] = [];
+
+  /* { declarations: something } */
+  updateDecoratorDeclarations: if (ts.isPropertyAssignment(declarations)) {
+    const initializer = declarations.initializer;
+    /* { declarations: [some, stuff] } */
+    if (!ts.isArrayLiteralExpression(initializer))
+      break updateDecoratorDeclarations;
+
+    const updatedDeclarations = initializer.elements.filter(
+      (el) =>
+        !ts.isIdentifier(el) ||
+        !data.toMigrate.find((cls) => cls.name!.text === el.text),
+    );
+
+    const updatedDecoratorDeclarations = ts.factory.updatePropertyAssignment(
+      declarations,
+      declarations.name,
+      ts.factory.createArrayLiteralExpression(updatedDeclarations),
+    );
+
+    updatedDecoratorProperties.push(updatedDecoratorDeclarations);
+  }
+
+  const imports = findLiteralProperty(metadata, "imports");
+  const newImports = data.toMigrate.map((cls) => cls.name!);
+
+  /* if module does not import anything yet */
+  if (!imports) {
+    /* create imports declaration to add */
+    const newImportsProperty = ts.factory.createPropertyAssignment(
+      "imports",
+      ts.factory.createArrayLiteralExpression(newImports),
+    );
+
+    updatedDecoratorProperties.push(newImportsProperty);
+  } else if (
+    /* if module has imports in form of array literal: { imports: [stuff, here] } */
+    ts.isPropertyAssignment(imports) &&
+    ts.isArrayLiteralExpression(imports.initializer)
+  ) {
+    const newImportsProperty = ts.factory.createArrayLiteralExpression([
+      ...imports.initializer.elements,
+      ...newImports,
+    ]);
+
+    const updatedImportsProperty = ts.factory.updatePropertyAssignment(
+      imports,
+      imports.name,
+      newImportsProperty,
+    );
+
+    updatedDecoratorProperties.push(updatedImportsProperty);
+  } else if (ts.isShorthandPropertyAssignment(imports)) {
+    /* if module has imports in form of shorthand assignment { imports } */
+    /* spread exising imports and add new: { imports: [...imports, new, stuff] } */
+    const newImportsProperty = ts.factory.createArrayLiteralExpression([
+      ts.factory.createSpreadElement(ts.factory.createIdentifier("imports")),
+      ...newImports,
+    ]);
+
+    const updatedImportsProperty = ts.factory.createPropertyAssignment(
+      "imports",
+      newImportsProperty,
+    );
+
+    updatedDecoratorProperties.push(updatedImportsProperty);
+  }
+
+  const newDecoratorProperties = metadata.properties
+    .map((existingProperty) => {
+      if (!isNamedPropertyAssignment(existingProperty)) return existingProperty;
+
+      const updatedProperty = updatedDecoratorProperties.find(
+        (updatedProperty) =>
+          propertyNamesEqual(existingProperty, updatedProperty),
+      );
+
+      if (updatedProperty) {
+        /* drop this property from the list of updated properties */
+        updatedDecoratorProperties = updatedDecoratorProperties.filter(
+          (p) => p !== updatedProperty,
+        );
+        return updatedProperty;
+      }
+
+      return existingProperty;
+    })
+    .concat(updatedDecoratorProperties);
+
+  data.tracker.replaceNode(
+    metadata,
+    ts.factory.updateObjectLiteralExpression(
+      metadata,
+      ts.factory.createNodeArray(
+        newDecoratorProperties,
+        metadata.properties.hasTrailingComma,
+      ),
+    ),
+    ts.EmitHint.Expression,
+  );
+
+  const declarationsGroupedByArrays = new Map<
+    ts.ArrayLiteralExpression,
+    ts.Identifier[]
+  >([]);
+  declarationsOutsideDecorator.forEach((identifier) => {
+    const containingArray = identifier.parent;
+
+    /* we expect declarations to be in array; ignore other cases (are there any?) */
+    if (!ts.isArrayLiteralExpression(containingArray)) return;
+
+    if (!declarationsGroupedByArrays.has(containingArray))
+      declarationsGroupedByArrays.set(containingArray, []);
+
+    declarationsGroupedByArrays.get(containingArray)!.push(identifier);
+  });
+
+  for (let [array, toRemove] of declarationsGroupedByArrays.entries()) {
+    data.tracker.replaceNode(
+      array,
+      ts.factory.createArrayLiteralExpression(
+        array.elements.filter((el) => !(toRemove as Expression[]).includes(el)),
+      ),
+    );
+  }
+}
+
+function propertyNamesEqual(
+  propA: ts.ObjectLiteralElementLike,
+  propB: ts.ObjectLiteralElementLike,
+) {
+  return getPropertyName(propA) === getPropertyName(propB);
+}
+
+function getPropertyName(
+  prop: ts.ObjectLiteralElementLike,
+): string | undefined {
+  if (isNamedPropertyAssignment(prop)) return prop.name.text;
+  return undefined;
+}
+
+function isNodeWithinAnother(data: {
+  node: ts.Node;
+  within: ts.Node;
+}): boolean {
+  return (
+    data.node.getStart() >= data.within.getStart() &&
+    data.node.getEnd() <= data.within.getEnd()
+  );
+}
+
+function findIdentifierInCollectionNaively(data: {
+  array: ts.ObjectLiteralElementLike;
+  identifierToFind: string;
+  typeChecker: TypeChecker;
+}): ts.Identifier | undefined {
+  const { array } = data;
+
+  if (ts.isPropertyAssignment(array)) {
+    /* case of { property: variable } */
+    if (ts.isIdentifier(array.initializer)) {
+      const symbol = data.typeChecker.getSymbolAtLocation(array.initializer);
+
+      const variableDeclaration = symbol?.declarations?.find((declaration) =>
+        ts.isVariableDeclaration(declaration),
+      ) as ts.VariableDeclaration;
+      /* ignore lack of declaration (decl. in another file) */
+      if (!variableDeclaration) return undefined;
+
+      const variableInitizlizer = variableDeclaration.initializer;
+      /* ignore cases other than `variable = [some, array];` */
+      if (
+        !variableInitizlizer ||
+        !ts.isArrayLiteralExpression(variableInitizlizer)
+      )
+        return undefined;
+
+      return variableInitizlizer.elements.find(
+        (element) =>
+          ts.isIdentifier(element) && element.text === data.identifierToFind,
+      ) as ts.Identifier | undefined;
+    } else if (ts.isArrayLiteralExpression(array.initializer)) {
+      /* case of { property: [some, stuff, ...here] } */
+      return array.initializer.elements.find(
+        (element) =>
+          ts.isIdentifier(element) && element.text === data.identifierToFind,
+      ) as ts.Identifier | undefined;
+    }
+  }
+
+  /* case of { property } where property is both key and a variable */
+  if (ts.isShorthandPropertyAssignment(data.array)) {
+    const symbol = data.typeChecker.getSymbolAtLocation(data.array);
+    const variableDeclaration = symbol?.declarations?.find((declaration) =>
+      ts.isVariableDeclaration(declaration),
+    ) as ts.VariableDeclaration;
+    /* ignore lack of declaration (decl. in another file) */
+    if (!variableDeclaration) return undefined;
+
+    const variableInitizlizer = variableDeclaration.initializer;
+    /* ignore cases other than `variable = [some, array];` */
+    if (
+      !variableInitizlizer ||
+      !ts.isArrayLiteralExpression(variableInitizlizer)
+    )
+      return undefined;
+
+    return variableInitizlizer.elements.find(
+      (element) =>
+        ts.isIdentifier(element) && element.text === data.identifierToFind,
+    ) as ts.Identifier | undefined;
+  }
+
+  return undefined;
+}
+
 /**
  * Finds all places migrated dependency is being used and updates the imports.
  * @param decl Declaration being converted.
@@ -350,67 +648,99 @@ function convertNgModuleDeclarationToStandalone(
  * @param importRemapper
  */
 function importNewStandaloneInConsumers(data: {
-  toMigrate: ts.ClassDeclaration;
+  toMigrate: ts.ClassDeclaration[];
   tracker: ChangeTracker;
+  templateTypeChecker: TemplateTypeChecker;
   importRemapper?: DeclarationImportsRemapper;
 }): void {
-  const { toMigrate: decl, tracker } = data;
-  const toMigrateMeta = context.checker.ng.getDirectiveMetadata(decl);
-  if (!toMigrateMeta) return;
+  const { toMigrate, tracker, templateTypeChecker } = data;
+  // assuming we only migrate 1 component and it's dependencies
+  const toMigrateOwningModule = templateTypeChecker.getOwningNgModule(
+    toMigrate[0],
+  );
+  if (!toMigrateOwningModule) return;
 
-  const selectorToMigrate = toMigrateMeta.selector;
-  if (!selectorToMigrate) return;
+  const importsPerModuleLike = new Map<
+    ts.ClassDeclaration,
+    ts.ClassDeclaration[]
+  >([]);
+  const queueImport = (importData: {
+    moduleLike: ts.ClassDeclaration;
+    classDeclaration: ts.ClassDeclaration;
+  }) => {
+    const imports = importsPerModuleLike.get(importData.moduleLike) ?? [];
+    importsPerModuleLike.set(importData.moduleLike, [
+      ...imports,
+      importData.classDeclaration,
+    ]);
+  };
 
-  const directConsumers = context.elements
-    .filter((el) => {
-      if (el.type !== NgElementType.Component) return false;
-      console.log("checking", el.cls.name?.getText());
+  for (let classDeclaration of toMigrate) {
+    const directConsumers = getAllConsumers({
+      classDeclaration,
+      templateTypeChecker,
+    });
+    const moduleLikeConsumersList = directConsumers
+      // migration targets modified separately - @see convertNgModuleDeclarationToStandalone()
+      .filter((consumer) => !toMigrate.includes(consumer.cls))
+      .map(
+        (consumer) =>
+          templateTypeChecker.getOwningNgModule(consumer.cls) ?? consumer.cls,
+      );
+    const moduleLikeConsumersSet = new Set(moduleLikeConsumersList);
 
-      const template = getTemplateOrNull(el.decorator.node);
-      if (!template) return null;
+    // owning module modified separately - @see migrateOwningModule()
+    moduleLikeConsumersSet.delete(toMigrateOwningModule);
 
-      // naive method, will not handle complex selectors
-      const tags = getAllXmlTags(template);
-      const hit = tags.includes(selectorToMigrate);
+    for (let moduleLike of moduleLikeConsumersSet.values()) {
+      queueImport({ moduleLike, classDeclaration });
+    }
+  }
 
-      if (hit) console.log("HIT!");
-      return hit;
-    })
-    .map((consumer) => ({
-      ...consumer,
-      owningModule: context.checker.ng.getOwningNgModule(consumer.cls),
-    }));
+  const addFileImportIfNotExists = (importData: {
+    moduleLike: ts.ClassDeclaration;
+    classDeclaration: ts.ClassDeclaration;
+  }) => {
+    const { moduleLike, classDeclaration } = importData;
+    if (!classDeclaration.name) return;
 
-  const modulesToUpdate = [
-    ...new Set(directConsumers.map((_) => _.owningModule)),
-  ].filter(Boolean);
-  const standaloneToUpdate = directConsumers
-    .filter((_) => !_.owningModule)
-    .map((_) => _.cls);
-  const toUpdate = [...modulesToUpdate, ...standaloneToUpdate];
+    const sourceFile = moduleLike.getSourceFile();
 
-  for (let importTarget of toUpdate) {
-    if (!importTarget || !decl.name?.text) continue;
-
-    // if the file does not already import class
     if (
-      !isClassImported({
-        classDeclaration: decl,
-        sourceFile: importTarget.getSourceFile(),
+      isClassImported({
+        classDeclaration,
+        sourceFile,
         typeChecker: context.checker.ts,
       })
-    ) {
-      // add import (using project-scoped absolute path)
-      tracker.addImport(
-        importTarget.getSourceFile(),
-        decl.name.text,
-        // drop '.ts' extension from final import path
-        relative(context.basePath, decl.getSourceFile().fileName).slice(0, -3),
-      );
-    }
+    )
+      return;
+
+    // add import (using project-scoped absolute path)
+    tracker.addImport(
+      moduleLike.getSourceFile(),
+      classDeclaration.name.text,
+      // drop '.ts' extension from final import path
+      relative(
+        context.basePath,
+        classDeclaration.getSourceFile().fileName,
+      ).slice(0, -3),
+    );
+  };
+
+  for (let moduleLike of importsPerModuleLike.keys()) {
+    const classesToImport = importsPerModuleLike.get(moduleLike);
+    if (!classesToImport) continue;
+
+    classesToImport.forEach((classDeclaration) =>
+      addFileImportIfNotExists({ moduleLike, classDeclaration }),
+    );
 
     // reference class inside `imports` of module or standalone component
-    addImportToModuleLike({ import: decl, to: importTarget, tracker });
+    addImportsToModuleLike({
+      import: classesToImport,
+      to: moduleLike,
+      tracker,
+    });
   }
 }
 
@@ -607,168 +937,6 @@ export function potentialImportsToExpressions(
 //  }
 //}
 
-///**
-// * Moves all the symbol references from the `declarations` array to the `imports`
-// * array of an `NgModule` class and removes the `declarations`.
-// * @param literal Object literal used to configure the module that should be migrated.
-// * @param allDeclarations All the declarations that are being converted as a part of this migration.
-// * @param typeChecker
-// * @param tracker
-// */
-//function moveDeclarationsToImports(
-//  literal: ts.ObjectLiteralExpression,
-//  allDeclarations: Set<ts.ClassDeclaration>,
-//  typeChecker: ts.TypeChecker,
-//  templateTypeChecker: TemplateTypeChecker,
-//  tracker: ChangeTracker,
-//): void {
-//  const declarationsProp = findLiteralProperty(literal, "declarations");
-//
-//  if (!declarationsProp) {
-//    return;
-//  }
-//
-//  const declarationsToPreserve: ts.Expression[] = [];
-//  const declarationsToCopy: ts.Expression[] = [];
-//  const properties: ts.ObjectLiteralElementLike[] = [];
-//  const importsProp = findLiteralProperty(literal, "imports");
-//  const hasAnyArrayTrailingComma = literal.properties.some(
-//    (prop) =>
-//      ts.isPropertyAssignment(prop) &&
-//      ts.isArrayLiteralExpression(prop.initializer) &&
-//      prop.initializer.elements.hasTrailingComma,
-//  );
-//
-//  // Separate the declarations that we want to keep and ones we need to copy into the `imports`.
-//  if (ts.isPropertyAssignment(declarationsProp)) {
-//    // If the declarations are an array, we can analyze it to
-//    // find any classes from the current migration.
-//    if (ts.isArrayLiteralExpression(declarationsProp.initializer)) {
-//      for (const el of declarationsProp.initializer.elements) {
-//        if (ts.isIdentifier(el)) {
-//          const correspondingClass = findClassDeclaration(el, typeChecker);
-//
-//          if (
-//            !correspondingClass ||
-//            // Check whether the declaration is either standalone already or is being converted
-//            // in this migration. We need to check if it's standalone already, in order to correct
-//            // some cases where the main app and the test files are being migrated in separate
-//            // programs.
-//            isStandaloneDeclaration(
-//              correspondingClass,
-//              allDeclarations,
-//              templateTypeChecker,
-//            )
-//          ) {
-//            declarationsToCopy.push(el);
-//          } else {
-//            declarationsToPreserve.push(el);
-//          }
-//        } else {
-//          declarationsToCopy.push(el);
-//        }
-//      }
-//    } else {
-//      // Otherwise create a spread that will be copied into the `imports`.
-//      declarationsToCopy.push(
-//        ts.factory.createSpreadElement(declarationsProp.initializer),
-//      );
-//    }
-//  }
-//
-//  // If there are no `imports`, create them with the declarations we want to copy.
-//  if (!importsProp && declarationsToCopy.length > 0) {
-//    properties.push(
-//      ts.factory.createPropertyAssignment(
-//        "imports",
-//        ts.factory.createArrayLiteralExpression(
-//          ts.factory.createNodeArray(
-//            declarationsToCopy,
-//            hasAnyArrayTrailingComma && declarationsToCopy.length > 2,
-//          ),
-//        ),
-//      ),
-//    );
-//  }
-//
-//  for (const prop of literal.properties) {
-//    if (!isNamedPropertyAssignment(prop)) {
-//      properties.push(prop);
-//      continue;
-//    }
-//
-//    // If we have declarations to preserve, update the existing property, otherwise drop it.
-//    if (prop === declarationsProp) {
-//      if (declarationsToPreserve.length > 0) {
-//        const hasTrailingComma = ts.isArrayLiteralExpression(prop.initializer)
-//          ? prop.initializer.elements.hasTrailingComma
-//          : hasAnyArrayTrailingComma;
-//        properties.push(
-//          ts.factory.updatePropertyAssignment(
-//            prop,
-//            prop.name,
-//            ts.factory.createArrayLiteralExpression(
-//              ts.factory.createNodeArray(
-//                declarationsToPreserve,
-//                hasTrailingComma && declarationsToPreserve.length > 2,
-//              ),
-//            ),
-//          ),
-//        );
-//      }
-//      continue;
-//    }
-//
-//    // If we have an `imports` array and declarations
-//    // that should be copied, we merge the two arrays.
-//    if (prop === importsProp && declarationsToCopy.length > 0) {
-//      let initializer: ts.Expression;
-//
-//      if (ts.isArrayLiteralExpression(prop.initializer)) {
-//        initializer = ts.factory.updateArrayLiteralExpression(
-//          prop.initializer,
-//          ts.factory.createNodeArray(
-//            [...prop.initializer.elements, ...declarationsToCopy],
-//            prop.initializer.elements.hasTrailingComma,
-//          ),
-//        );
-//      } else {
-//        initializer = ts.factory.createArrayLiteralExpression(
-//          ts.factory.createNodeArray(
-//            [
-//              ts.factory.createSpreadElement(prop.initializer),
-//              ...declarationsToCopy,
-//            ],
-//            // Expect the declarations to be greater than 1 since
-//            // we have the pre-existing initializer already.
-//            hasAnyArrayTrailingComma && declarationsToCopy.length > 1,
-//          ),
-//        );
-//      }
-//
-//      properties.push(
-//        ts.factory.updatePropertyAssignment(prop, prop.name, initializer),
-//      );
-//      continue;
-//    }
-//
-//    // Retain any remaining properties.
-//    properties.push(prop);
-//  }
-//
-//  tracker.replaceNode(
-//    literal,
-//    ts.factory.updateObjectLiteralExpression(
-//      literal,
-//      ts.factory.createNodeArray(
-//        properties,
-//        literal.properties.hasTrailingComma,
-//      ),
-//    ),
-//    ts.EmitHint.Expression,
-//  );
-//}
-
 /**
  * Moves all the symbol references from the `declarations` array to the `imports`
  * array of an `NgModule` class and removes the `declarations`.
@@ -776,14 +944,11 @@ export function potentialImportsToExpressions(
  * @param typeChecker
  * @param tracker
  */
-function addImportToModuleLike(data: {
-  import: ts.ClassDeclaration;
+function addImportsToModuleLike(data: {
+  import: ts.ClassDeclaration[];
   to: ts.ClassDeclaration;
   tracker: ChangeTracker;
 }): void {
-  if (!data.import.name)
-    throw new Error("Class to be imported has no name (?)");
-
   const decorator = context.checker.ng.getPrimaryAngularDecorator(data.to);
   if (!decorator)
     throw new Error(`${data.to.name?.text} has no angular decorator.`);
@@ -800,7 +965,9 @@ function addImportToModuleLike(data: {
       prop.initializer.elements.hasTrailingComma,
   );
 
-  const newImport = ts.factory.createIdentifier(data.import.name.text);
+  const newImport = data.import.map((_) =>
+    ts.factory.createIdentifier(_.name!.text),
+  );
 
   const properties: ts.ObjectLiteralElementLike[] = [];
 
@@ -819,14 +986,14 @@ function addImportToModuleLike(data: {
         initializer = ts.factory.updateArrayLiteralExpression(
           prop.initializer,
           ts.factory.createNodeArray(
-            [...prop.initializer.elements, newImport],
+            [...prop.initializer.elements, ...newImport],
             prop.initializer.elements.hasTrailingComma,
           ),
         );
       } else {
         initializer = ts.factory.createArrayLiteralExpression(
           ts.factory.createNodeArray(
-            [ts.factory.createSpreadElement(prop.initializer), newImport],
+            [ts.factory.createSpreadElement(prop.initializer), ...newImport],
             // Expect the declarations to be greater than 1 since
             // we have the pre-existing initializer already.
             hasAnyArrayTrailingComma,
@@ -868,16 +1035,17 @@ function markDecoratorAsStandalone(node: ts.Decorator): ts.Decorator {
 
   // In v19 standalone is the default so don't do anything if there's no `standalone`
   // property or it's initialized to anything other than `false`.
-  if (
-    !standaloneProp ||
-    standaloneProp.initializer.kind !== ts.SyntaxKind.FalseKeyword
-  ) {
-    return node;
-  }
+  // if (
+  //   !standaloneProp ||
+  //   standaloneProp.initializer.kind !== ts.SyntaxKind.FalseKeyword
+  // ) {
+  //   return node;
+  // }
 
-  const newProperties = metadata.properties.filter(
-    (element) => element !== standaloneProp,
-  );
+  const newProperties = [
+    ...metadata.properties.filter((element) => element !== standaloneProp),
+    ts.factory.createPropertyAssignment("standalone", ts.factory.createTrue()),
+  ];
 
   // Use `createDecorator` instead of `updateDecorator`, because
   // the latter ends up duplicating the node's leading comment.
