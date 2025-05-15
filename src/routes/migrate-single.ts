@@ -15,7 +15,11 @@ import {
 import ts, { Expression, TypeChecker } from "typescript";
 import { XMLParser } from "fast-xml-parser";
 
-import { ChangeTracker, ImportRemapper } from "../../utils/change_tracker";
+import {
+  ChangeTracker,
+  ImportRemapper,
+  normalizePath,
+} from "../../utils/change_tracker";
 import { getAngularDecorators, NgDecorator } from "../../utils/ng_decorators";
 import { closestNode } from "../../utils/typescript/nodes";
 import { ScriptContext, context } from "../main";
@@ -28,6 +32,7 @@ import { isClassImported } from "./migrate-single/utils";
 import { FastifyInstance, FastifyPluginOptions } from "fastify";
 import { FastifyPluginAsync } from "fastify";
 import { noElementWithId, notOfType } from "./api-responses";
+import { source } from "@angular-devkit/schematics";
 
 /**
  * Function that can be used to prcess the dependencies that
@@ -76,7 +81,12 @@ export const toStandaloneRoute: FastifyPluginAsync = async (
       classDeclaration: component.cls,
       templateTypeChecker: context.checker.ng,
     });
-    toStandalone([component.cls, ...dependencies], context, printer);
+    toStandalone(
+      context.source.files,
+      [component.cls, ...dependencies],
+      context,
+      printer,
+    );
 
     context.server.shut();
 
@@ -245,7 +255,7 @@ function getSameModuleDependencies(data: {
  * imports.
  */
 export function toStandalone(
-  // sourceFiles: ts.SourceFile[],
+  sourceFiles: readonly ts.SourceFile[],
   toMigrate: ts.ClassDeclaration[],
   // program: NgtscProgram,
   context: ScriptContext,
@@ -259,7 +269,7 @@ export function toStandalone(
   const typeChecker = program.getTsProgram().getTypeChecker();
   // const modulesToMigrate = new Set<ts.ClassDeclaration>();
   // const testObjectsToMigrate = new Set<ts.ObjectLiteralExpression>();
-  const declarations = new Set<ts.ClassDeclaration>();
+  // const declarations = new Set<ts.ClassDeclaration>();
   const tracker = new ChangeTracker(printer, fileImportRemapper);
 
   // for (const sourceFile of sourceFiles) {
@@ -297,6 +307,16 @@ export function toStandalone(
   migrateOwningModule({ toMigrate, templateTypeChecker, typeChecker, tracker });
 
   importNewStandaloneInConsumers({ toMigrate, tracker, templateTypeChecker });
+
+  for (const sourceFile of sourceFiles) {
+    makeRelatedNamedImportsAbsolute({
+      toMigrate,
+      tracker,
+      sourceFile,
+      typeChecker,
+      printer,
+    });
+  }
 
   // for (const node of modulesToMigrate) {
   //   migrateNgModuleClass(node, declarations, tracker, typeChecker, templateTypeChecker);
@@ -742,6 +762,149 @@ function importNewStandaloneInConsumers(data: {
       tracker,
     });
   }
+}
+
+function makeRelatedNamedImportsAbsolute(data: {
+  sourceFile: ts.SourceFile;
+  toMigrate: ts.ClassDeclaration[];
+  tracker: ChangeTracker;
+  typeChecker: TypeChecker;
+  printer: ts.Printer;
+}) {
+  const {
+    sourceFile,
+    toMigrate: classDeclarations,
+    tracker,
+    typeChecker,
+    printer,
+  } = data;
+
+  const foundImports: ts.ImportSpecifier[] = [];
+
+  // Traverse the source file to find import declarations
+  function processNode(node: ts.Node) {
+    // Check if the node is an import declaration with an import clause
+    processing: {
+      if (!ts.isImportDeclaration(node) || !node.importClause) break processing;
+
+      const importClause = node.importClause;
+      const namedBindings = importClause.namedBindings;
+
+      // Check for named imports (not namespace imports)
+      if (!namedBindings || !ts.isNamedImports(namedBindings)) break processing;
+
+      const elements = namedBindings.elements;
+
+      // Filter out the imports we want to remove
+      const remainingElements = elements.filter((element) => {
+        const toRemove = classDeclarations.some((declaration) =>
+          doesImportReferenceClassDeclaration({
+            typeChecker,
+            declaration,
+            import: element,
+          }),
+        );
+        if (toRemove) {
+          foundImports.push(element);
+        }
+        return !toRemove;
+      });
+
+      if (remainingElements.length === 0) {
+        // If all named imports are removed
+        if (!importClause.name) {
+          // No default import exists, remove the entire import declaration
+          tracker.removeNode(node);
+        } else {
+          // Default import exists, create a new import clause without named imports
+          const newImportClause = ts.factory.createImportClause(
+            importClause.isTypeOnly,
+            importClause.name,
+            undefined,
+          );
+          tracker.replaceNode(importClause, newImportClause);
+        }
+      } else if (remainingElements.length !== elements.length) {
+        // Some imports remain, create a new named imports node to handle commas correctly
+        const newNamedImports =
+          ts.factory.createNamedImports(remainingElements);
+        tracker.replaceNode(namedBindings, newNamedImports);
+      }
+    }
+
+    // Continue traversal
+    ts.forEachChild(node, processNode);
+  }
+
+  // Start the traversal
+  processNode(sourceFile);
+
+  foundImports.forEach((foundImport) => {
+    const targetClass = classDeclarations.find((declaration) =>
+      doesImportReferenceClassDeclaration({
+        declaration,
+        typeChecker,
+        import: foundImport,
+      }),
+    );
+
+    console.log(
+      "foundImport",
+      foundImport.getText(),
+      "targetClass",
+      targetClass?.name,
+    );
+    if (!targetClass) return;
+
+    // drop '.ts' extension from final import path
+    const newImportPath = relative(
+      context.basePath,
+      targetClass.getSourceFile().fileName,
+    ).slice(0, -3);
+
+    const newImport = ts.factory.createImportDeclaration(
+      undefined,
+      ts.factory.createImportClause(
+        false,
+        undefined,
+        ts.factory.createNamedImports([
+          ts.factory.createImportSpecifier(
+            false,
+            undefined,
+            ts.factory.createIdentifier(targetClass.name!.text),
+          ),
+        ]),
+      ),
+      ts.factory.createStringLiteral(newImportPath),
+    );
+
+    const newImportText =
+      "\n" + printer.printNode(ts.EmitHint.Unspecified, newImport, sourceFile);
+
+    // add import (using project-scoped absolute path)
+    tracker.insertText(sourceFile, 0, newImportText);
+  });
+}
+
+function doesImportReferenceClassDeclaration(data: {
+  import: ts.ImportSpecifier;
+  declaration: ts.ClassDeclaration;
+  typeChecker: ts.TypeChecker;
+}): boolean | undefined {
+  const classSymbol = data.typeChecker.getSymbolAtLocation(
+    data.declaration.name!,
+  );
+  if (!classSymbol) return undefined;
+
+  const localSymbol = data.typeChecker.getSymbolAtLocation(data.import.name);
+  if (localSymbol === classSymbol) return true;
+
+  if (!localSymbol) return;
+
+  return (
+    data.typeChecker.getAliasedSymbol(localSymbol) === classSymbol ||
+    localSymbol.valueDeclaration === data.declaration
+  );
 }
 
 function getTemplateOrNull(decorator: ts.Decorator): string | null {
