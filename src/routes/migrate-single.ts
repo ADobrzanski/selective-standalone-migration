@@ -82,6 +82,44 @@ function findMigrationBlockers(data: {
   const { classDeclaration, templateTypeChecker } = data;
 
   const owningModule = templateTypeChecker.getOwningNgModule(classDeclaration)!;
+
+  const selector =
+    templateTypeChecker.getDirectiveMetadata(classDeclaration)?.selector;
+  if (!selector)
+    throw Error(
+      "Cannot check templates for usage if component has no selector.",
+    );
+
+  const sameModuleConsumers = getSameModuleConsumers(data);
+  // no consumers in owning module means no need to import migrated component back
+  if (sameModuleConsumers.length === 0) return null;
+
+  const sameModuleDependencies = getSameModuleDependenciesDeep(data);
+  // no dependencies in owning module means no need to import module into migrated component
+  if (sameModuleDependencies.length === 0) return null;
+
+  const componentName = classDeclaration.name?.text;
+  const owningModuleName = owningModule.name?.text;
+
+  return {
+    error: "Migration would result in circular dependecy.",
+    details:
+      `${componentName} is currently declared in ${owningModuleName}.` +
+      ` There are ${sameModuleConsumers.length} component(s) declared in that module depending on ${componentName}.` +
+      ` There are also ${sameModuleDependencies.length} dependencies declared in that module ${componentName} uses.` +
+      ` Migrating ${componentName} would result in circular dependecy. Migrate either said consumers or dependencies first to prevent this issue.`,
+    consumers: sameModuleConsumers.map((_) => _.cls.name?.text),
+    dependencies: sameModuleDependencies.map((_) => _.name.text),
+  };
+}
+
+function getSameModuleConsumers(data: {
+  classDeclaration: ts.ClassDeclaration;
+  templateTypeChecker: TemplateTypeChecker;
+}) {
+  const { classDeclaration, templateTypeChecker } = data;
+
+  const owningModule = templateTypeChecker.getOwningNgModule(classDeclaration)!;
   const selector =
     templateTypeChecker.getDirectiveMetadata(classDeclaration)?.selector;
 
@@ -110,35 +148,48 @@ function findMigrationBlockers(data: {
     return getAllXmlTags(template).includes(selector);
   });
 
-  if (sameModuleConsumers.length === 0) {
-    return null;
+  return sameModuleConsumers;
+}
+
+function getSameModuleDependenciesDeep(data: {
+  classDeclaration: ts.ClassDeclaration;
+  templateTypeChecker: TemplateTypeChecker;
+}) {
+  const { templateTypeChecker } = data;
+
+  const queue = getSameModuleDependencies(data);
+  const result: NamedClassDeclaration[] = [];
+
+  while (queue.length > 0) {
+    const classDeclaration = queue.splice(0, 1)[0];
+    result.push(classDeclaration);
+    queue.push(
+      ...getSameModuleDependencies({ classDeclaration, templateTypeChecker }),
+    );
   }
 
-  const sameModuleDependencies =
-    context.elements
-      .find((_) => _.cls === classDeclaration)
-      ?.dependencies()
-      .filter(
-        (_) => templateTypeChecker.getOwningNgModule(_.node) === owningModule,
-      ) ?? [];
+  return result;
+}
 
-  if (sameModuleDependencies.length === 0) {
-    return null;
-  }
+function getSameModuleDependencies(data: {
+  classDeclaration: ts.ClassDeclaration;
+  templateTypeChecker: TemplateTypeChecker;
+}) {
+  const templateDependencies = findTemplateDependencies(
+    data.classDeclaration,
+    data.templateTypeChecker,
+  );
+  if (!templateDependencies || templateDependencies.length < 1) return [];
 
-  const componentName = classDeclaration.name?.text;
-  const owningModuleName = owningModule.name?.text;
+  const owningModule = data.templateTypeChecker.getOwningNgModule(
+    data.classDeclaration,
+  );
+  const sameModuleDependencies = templateDependencies.filter(
+    (dep) =>
+      data.templateTypeChecker.getOwningNgModule(dep.node) === owningModule,
+  );
 
-  return {
-    error: "Migration would result in circular dependecy.",
-    details:
-      `${componentName} is currently declared in ${owningModuleName}.` +
-      ` There are ${sameModuleConsumers.length} component(s) declared in that module depending on ${componentName}.` +
-      ` There are also ${sameModuleDependencies.length} dependencies declared in that module ${componentName} uses.` +
-      ` Migrating ${componentName} would result in circular dependecy. Migrate either said consumers or dependencies first to prevent this issue.`,
-    consumers: sameModuleConsumers.map((_) => _.cls.name?.text),
-    dependencies: sameModuleDependencies.map((_) => _.node.name.text),
-  };
+  return sameModuleDependencies.map((_) => _.node);
 }
 
 /**
