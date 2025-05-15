@@ -15,11 +15,7 @@ import {
 import ts, { Expression, TypeChecker } from "typescript";
 import { XMLParser } from "fast-xml-parser";
 
-import {
-  ChangeTracker,
-  ImportRemapper,
-  normalizePath,
-} from "../../utils/change_tracker";
+import { ChangeTracker, ImportRemapper } from "../../utils/change_tracker";
 import { getAngularDecorators, NgDecorator } from "../../utils/ng_decorators";
 import { closestNode } from "../../utils/typescript/nodes";
 import { ScriptContext, context } from "../main";
@@ -32,7 +28,6 @@ import { isClassImported } from "./migrate-single/utils";
 import { FastifyInstance, FastifyPluginOptions } from "fastify";
 import { FastifyPluginAsync } from "fastify";
 import { noElementWithId, notOfType } from "./api-responses";
-import { source } from "@angular-devkit/schematics";
 
 /**
  * Function that can be used to prcess the dependencies that
@@ -67,12 +62,26 @@ export const toStandaloneRoute: FastifyPluginAsync = async (
 
     const printer = ts.createPrinter();
 
-    const migrationIssues = findMigrationBlockers({
+    const migrationBlockers = findMigrationBlockers({
       classDeclaration: component.cls,
       templateTypeChecker: context.checker.ng,
     });
-    if (migrationIssues && !force) {
-      reply.status(409).send(migrationIssues);
+    if (migrationBlockers && !force) {
+      const error = createMigrationBlockersError({
+        classDeclaration: component.cls,
+        templateTypeChecker: context.checker.ng,
+        migrationBlockers,
+      });
+
+      reply.status(409).send({
+        ...error,
+        sameModuleDepenencies: migrationBlockers.sameModuleDependencies.map(
+          (dep) => dep.name?.text,
+        ),
+        sameModuleConsumers: migrationBlockers.sameModuleConsumers.map(
+          (consumer) => consumer.name?.text,
+        ),
+      });
       return;
     }
 
@@ -88,37 +97,23 @@ export const toStandaloneRoute: FastifyPluginAsync = async (
       printer,
     );
 
-    context.server.shut();
-
     reply.status(200).send();
+    context.server.close();
   });
 };
 
-function findMigrationBlockers(data: {
+function createMigrationBlockersError(data: {
   classDeclaration: ts.ClassDeclaration;
   templateTypeChecker: TemplateTypeChecker;
+  migrationBlockers: MigrationBlockers;
 }) {
-  const { classDeclaration, templateTypeChecker } = data;
+  const { sameModuleDependencies, sameModuleConsumers } =
+    data.migrationBlockers;
 
-  const owningModule = templateTypeChecker.getOwningNgModule(classDeclaration)!;
-
-  const selector =
-    templateTypeChecker.getDirectiveMetadata(classDeclaration)?.selector;
-  if (!selector)
-    throw Error(
-      "Cannot check templates for usage if component has no selector.",
-    );
-
-  const sameModuleConsumers = getSameModuleConsumers(data);
-  // no consumers in owning module means no need to import migrated component back
-  if (sameModuleConsumers.length === 0) return null;
-
-  const sameModuleDependencies = getSameModuleDependenciesDeep(data);
-  // no dependencies in owning module means no need to import module into migrated component
-  if (sameModuleDependencies.length === 0) return null;
-
-  const componentName = classDeclaration.name?.text;
-  const owningModuleName = owningModule.name?.text;
+  const componentName = data.classDeclaration.name?.text;
+  const owningModuleName = data.templateTypeChecker.getOwningNgModule(
+    data.classDeclaration,
+  )?.name?.text;
 
   return {
     error: "Migration would result in circular dependecy.",
@@ -127,9 +122,38 @@ function findMigrationBlockers(data: {
       ` There are ${sameModuleConsumers.length} component(s) declared in that module depending on ${componentName}.` +
       ` There are also ${sameModuleDependencies.length} dependencies declared in that module ${componentName} uses.` +
       ` Migrating ${componentName} would result in circular dependecy. Migrate either said consumers or dependencies first to prevent this issue.`,
-    consumers: sameModuleConsumers.map((_) => _.cls.name?.text),
-    dependencies: sameModuleDependencies.map((_) => _.name.text),
   };
+}
+
+export interface MigrationBlockers {
+  sameModuleConsumers: ts.ClassDeclaration[];
+  sameModuleDependencies: ts.ClassDeclaration[];
+}
+
+export function findMigrationBlockers(data: {
+  classDeclaration: ts.ClassDeclaration;
+  templateTypeChecker: TemplateTypeChecker;
+}): MigrationBlockers | null {
+  const { classDeclaration, templateTypeChecker } = data;
+
+  const selector =
+    templateTypeChecker.getDirectiveMetadata(classDeclaration)?.selector;
+  if (!selector)
+    throw Error(
+      "Cannot check templates for usage if component has no selector.",
+    );
+
+  const sameModuleConsumers = getSameModuleConsumers(data).map(
+    (consumer) => consumer.cls,
+  );
+  // no consumers in owning module means no need to import migrated component back
+  if (sameModuleConsumers.length === 0) return null;
+
+  const sameModuleDependencies = getSameModuleDependenciesDeep(data);
+  // no dependencies in owning module means no need to import module into migrated component
+  if (sameModuleDependencies.length === 0) return null;
+
+  return { sameModuleConsumers, sameModuleDependencies };
 }
 
 function getAllConsumers(data: {
@@ -848,12 +872,6 @@ function makeRelatedNamedImportsAbsolute(data: {
       }),
     );
 
-    console.log(
-      "foundImport",
-      foundImport.getText(),
-      "targetClass",
-      targetClass?.name,
-    );
     if (!targetClass) return;
 
     // drop '.ts' extension from final import path
