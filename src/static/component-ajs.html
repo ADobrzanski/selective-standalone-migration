@@ -1,10 +1,5 @@
 <!doctype html>
 <head>
-  <script src="./dependency-chart.js" type="module"></script>
-  <script
-    defer
-    src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"
-  ></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
   <style>
     .node circle {
@@ -21,102 +16,65 @@
       stroke: #ccc;
       stroke-width: 2px;
     }
+    dialog {
+      /* Basic centering */
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+
+      /* Ensure it's above other content */
+      z-index: 1000;
+
+      /* Optional: Add some padding and a border */
+      padding: 20px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      background-color: white;
+    }
   </style>
 </head>
 <body>
-  <div
-    x-data="{ id: searchParam('id'), component: null }"
-    x-init="loadJSON(`/api/component/${id}`).then(set($data, 'component'))"
-  >
-    <div>
-      <template x-if="component">
-        <div>
-          <h3 x-template>${component.name}</h3>
-          <template x-if="!component.standalone">
-            <div>
-              <button @click="fetch(`/api/component/${id}/$makeStandalone`)">
-                Make standalone
-              </button>
-              <button
-                @click="fetch(`/api/component/${id}/$makeStandalone?force=true`)"
-              >
-                Make standalone (force)
-              </button>
-            </div>
-          </template>
-          <ul>
-            <li x-template>selector: ${component.selector}</li>
-            <template x-if="component.standalone">
-              <li x-template>standalone: ${component.standalone}</li>
-            </template>
-            <template x-if="component.declaredIn">
-              <li x-template>declared in: ${component.declaredIn.name}</li>
-            </template>
-          </ul>
-        </div>
-      </template>
-      <template x-if="!component">
-        <div>Loading component...</div>
-      </template>
-    </div>
+  <div id="app"></div>
 
-    <div
-      x-data="{ data: [], tree: null }"
-      x-init="loadJSON(`/api/component/${id}/dependency`).then(set($data, 'data'))"
-      x-effect="data?.length && component.id && set($data, 'tree')(createDependencyTreeNodes(component, data))"
-    >
-      <details>
-        <summary x-template>Template dependecies (${data?.length})</summary>
+  <script type="module">
+    import {
+      html,
+      render,
+      useState,
+      useEffect,
+      useRef,
+      useCallback,
+    } from "https://esm.sh/htm/preact/standalone";
+    import { DependencyChart } from "./dependency-chart.js";
 
-        <ul>
-          <template x-for="d in data">
-            <li>
-              <span x-html="d.name"></span>
-              <template x-if="d.standalone">
-                <span>(standalone)</span>
-              </template>
-              <template x-if="d.declaredIn">
-                <span>(<span x-html="d.declaredIn.name"></span>)</span>
-              </template>
-            </li>
-          </template>
-        </ul>
-      </details>
-
-      <template x-if="tree">
-        <my-chart
-          :data="JSON.stringify(tree)"
-          @node-super-click="expandDependencyTree($event.detail, $data)"
-        ></my-chart>
-      </template>
-    </div>
-  </div>
-
-  <script>
-    // alpine.js utils
+    // Utils
     function searchParam(name) {
       return new URLSearchParams(document.location.search).get(name);
     }
 
-    function loadJSON(url) {
-      return fetch(url).then((_) => _.json());
+    function GET(url, { displayError } = {}) {
+      return fetch(url).then(async (response) => {
+        const payload = await response.json();
+
+        if (!response.ok) {
+          if (displayError) displayError(payload);
+          else alert(JSON.stringify(payload));
+
+          throw new Error(payload);
+        }
+
+        return payload;
+      });
     }
 
-    function set(obj, propertyName) {
-      return (data) => {
-        obj[propertyName] = data;
-        return data;
-      };
-    }
-
-    // dependency tree helpers
+    // Dependency tree helpers
     function randomId() {
       return Math.random().toString().slice(2);
     }
 
     function createDependencyTreeNodes(root, data) {
       const deps = [...data];
-
       const modules = [];
 
       const standaloneModule = {
@@ -151,34 +109,108 @@
       return [root, ...deps, ...modules];
     }
 
-    async function expandDependencyTree(event, data) {
+    async function expandDependencyTree(event, setTree, tree) {
       try {
-        const depsResponse = await fetch(
+        const responseData = await GET(
           `/api/component/${event.elementId}/dependency`,
         );
-        const responseData = await depsResponse.json();
-
-        if (!depsResponse.ok) throw new Error(JSON.stringify(responseData));
-
         const subTree = createDependencyTreeNodes(event, responseData).filter(
           (_) => _.id !== event.id,
         );
-        data.tree.push(...subTree);
+        setTree([...(tree || []), ...subTree]);
       } catch (e) {
         alert(e);
       }
     }
 
-    document.addEventListener("alpine:init", () => {
-      Alpine.directive("template", (el, _, { effect, evaluateLater }) => {
-        let evaluate = evaluateLater("`" + el.innerText + "`");
-
-        effect(() => {
-          evaluate((value) => {
-            el.textContent = value;
-          });
-        });
+    const makeStandaloneFn = ({ id, force, displayError } = {}) =>
+      GET(`/api/component/${id}/$makeStandalone?force=${force}`, {
+        displayError,
       });
-    });
+
+    function ErrorDialog(props) {
+      return html`
+        <dialog open=${props.open}>
+          <h4>${props.error}</h4>
+          <div>${props.details}</div>
+          <button onClick=${() => props.onCancel()}>Cancel</button>
+          <button onClick=${() => props.onConfirm()}>Force migrate</button>
+        </dialog>
+      `;
+    }
+
+    function App() {
+      const id = searchParam("id");
+      const [component, setComponent] = useState(null);
+      const [dependencies, setDependencies] = useState([]);
+      const [tree, setTree] = useState(null);
+      const [error, displayError] = useState(null);
+
+      useEffect(() => {
+        GET(`/api/component/${id}`).then(setComponent);
+        GET(`/api/component/${id}/dependency`).then(setDependencies);
+      }, []);
+
+      useEffect(() => {
+        if (dependencies.length && component?.id) {
+          setTree(createDependencyTreeNodes(component, dependencies));
+        }
+      }, [dependencies, component]);
+
+      const makeStandalone = useCallback(
+        () => makeStandaloneFn({ id, displayError }),
+        [],
+      );
+      const makeStandaloneForce = useCallback(
+        () => makeStandaloneFn({ id, displayError, force: true }),
+        [],
+      );
+      const hideError = useCallback(() => displayError(false), []);
+      const expandNode = useCallback(
+        (e) => expandDependencyTree(e, setTree, tree),
+        [tree],
+      );
+
+      if (!component) {
+        return html`<div>Loading component...</div>`;
+      }
+
+      return html`
+        <div>
+          <h3>${component.name}</h3>
+
+          ${!component.standalone &&
+          html`
+            <div>
+              <button onClick=${makeStandalone}>Make standalone</button>
+            </div>
+          `}
+
+          <ul>
+            <li>selector: ${component.selector}</li>
+            ${component.standalone &&
+            html`<li>standalone: ${component.standalone}</li>`}
+            ${component.declaredIn &&
+            html`<li>declared in: ${component.declaredIn.name}</li>`}
+          </ul>
+
+          ${tree &&
+          html`
+            <${DependencyChart} data=${tree} onNodeSuperClick=${expandNode} />
+          `}
+          ${error &&
+          html`
+            <${ErrorDialog}
+              open
+              onCancel=${hideError}
+              onConfirm=${makeStandaloneForce}
+              ...${error}
+            />
+          `}
+        </div>
+      `;
+    }
+
+    render(html`<${App} />`, document.getElementById("app"));
   </script>
 </body>

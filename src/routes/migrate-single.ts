@@ -57,36 +57,36 @@ export const toStandaloneRoute: FastifyPluginAsync = async (
       classDeclaration: component.cls,
       templateTypeChecker: context.checker.ng,
     });
-    if (migrationBlockers && !force) {
-      const error = createMigrationBlockersError({
-        classDeclaration: component.cls,
-        templateTypeChecker: context.checker.ng,
-        migrationBlockers,
-      });
 
-      reply.status(409).send({
-        ...error,
-        sameModuleDepenencies: migrationBlockers.sameModuleDependencies.map(
-          (dep) => dep.name?.text,
-        ),
-        sameModuleConsumers: migrationBlockers.sameModuleConsumers.map(
-          (consumer) => consumer.name?.text,
-        ),
-      });
-      return;
+    if (migrationBlockers) {
+      if (force) {
+        toStandalone(
+          context.source.files,
+          [component.cls, ...migrationBlockers.sameModuleDependencies],
+          context,
+          printer,
+        );
+      } else {
+        const error = createMigrationBlockersError({
+          classDeclaration: component.cls,
+          templateTypeChecker: context.checker.ng,
+          migrationBlockers,
+        });
+
+        reply.status(409).send({
+          ...error,
+          sameModuleDepenencies: migrationBlockers.sameModuleDependencies.map(
+            (dep) => dep.name?.text,
+          ),
+          sameModuleConsumers: migrationBlockers.sameModuleConsumers.map(
+            (consumer) => consumer.name?.text,
+          ),
+        });
+        return;
+      }
+    } else {
+      toStandalone(context.source.files, [component.cls], context, printer);
     }
-
-    console.log("about to migrate");
-    const dependencies = getSameModuleDependenciesDeep({
-      classDeclaration: component.cls,
-      templateTypeChecker: context.checker.ng,
-    });
-    toStandalone(
-      context.source.files,
-      [component.cls, ...dependencies],
-      context,
-      printer,
-    );
 
     reply.status(200).send();
     context.server.close();
@@ -106,14 +106,25 @@ function createMigrationBlockersError(data: {
     data.classDeclaration,
   )?.name?.text;
 
-  return {
-    error: "Migration would result in circular dependecy.",
-    details:
-      `${componentName} is currently declared in ${owningModuleName}.` +
-      ` There are ${sameModuleConsumers.length} component(s) declared in that module depending on ${componentName}.` +
-      ` There are also ${sameModuleDependencies.length} dependencies declared in that module ${componentName} uses.` +
-      ` Migrating ${componentName} would result in circular dependecy. Migrate either said consumers or dependencies first to prevent this issue.`,
-  };
+  const circDep = sameModuleDependencies.find((_) =>
+    sameModuleConsumers.includes(_),
+  );
+  if (circDep)
+    return {
+      error: "Migration would result in circular dependecy ",
+      details:
+        `${componentName} and ${circDep.name!.text} create circular dependency.` +
+        `This script is unable to resolve this situation`,
+    };
+  else
+    return {
+      error: "Migration would result in circular dependecy (resolvable)",
+      details:
+        `${componentName} is currently declared in ${owningModuleName}.` +
+        ` There are ${sameModuleConsumers.length} component(s) declared in that module depending on ${componentName}.` +
+        ` There are also ${sameModuleDependencies.length} dependencies declared in that module ${componentName} uses.` +
+        ` Migrating ${componentName} would result in circular dependecy. Migrate either said consumers or dependencies first to prevent this issue.`,
+    };
 }
 
 export interface MigrationBlockers {
@@ -223,21 +234,22 @@ function getSameModuleConsumers(data: {
 function getSameModuleDependenciesDeep(data: {
   classDeclaration: ts.ClassDeclaration;
   templateTypeChecker: TemplateTypeChecker;
-}) {
+}): ts.ClassDeclaration[] {
   const { templateTypeChecker } = data;
 
   const queue = getSameModuleDependencies(data);
-  const result: NamedClassDeclaration[] = [];
+  const result = new Set<NamedClassDeclaration>([]);
 
   while (queue.length > 0) {
     const classDeclaration = queue.splice(0, 1)[0];
-    result.push(classDeclaration);
+    if (result.has(classDeclaration)) continue;
+    result.add(classDeclaration);
     queue.push(
       ...getSameModuleDependencies({ classDeclaration, templateTypeChecker }),
     );
   }
 
-  return result;
+  return [...result];
 }
 
 function getSameModuleDependencies(data: {
@@ -842,7 +854,7 @@ function makeRelatedNamedImportsAbsolute(data: {
     );
 
     const newImportText =
-      "\n" + printer.printNode(ts.EmitHint.Unspecified, newImport, sourceFile);
+      printer.printNode(ts.EmitHint.Unspecified, newImport, sourceFile) + "\n";
 
     // add import (using project-scoped absolute path)
     tracker.insertText(sourceFile, 0, newImportText);
