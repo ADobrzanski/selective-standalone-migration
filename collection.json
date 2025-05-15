@@ -1,0 +1,9 @@
+{
+  "$schema": "./node_modules/@angular-devkit/schematics/collection-schema.json",
+  "schematics": {
+    "run": {
+      "description": "Selective standalone migration",
+      "factory": "./dist/main#selectiveStandalone"
+    }
+  }
+}

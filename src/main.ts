@@ -64,7 +64,7 @@ export const context = {
   source: null,
 } as any as ScriptContext;
 
-export function dependencyVisualizer(_options) {
+export function selectiveStandalone(_options) {
   return async (tree: Tree, _context) => {
     const basePath = process.cwd();
     const { buildPaths } = await getProjectTsConfigPaths(tree);
@@ -84,7 +84,6 @@ export function dependencyVisualizer(_options) {
 
 async function analyseDependencies(data) {
   context.basePath = data.basePath;
-  context.abortController = new AbortController();
 
   const { host, options, rootNames } = createProgramOptions(
     data.tree,
@@ -142,9 +141,14 @@ async function analyseDependencies(data) {
     if (err) serverReadySignal.reject(err);
     else serverReadySignal.resolve(address);
   });
-  await serverReadySignal.instance.then((address) =>
-    console.log(`WEB UI ready @ ${address}`),
-  );
+  await serverReadySignal.instance.then((address) => {
+    const separator = `――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――`;
+    const serverReadyMessage = `\x1b[34m🌐\x1b[0m Use Web UI @ ${address}/component-list.html or the CLI below.`;
+
+    const message = [separator, serverReadyMessage, separator].join("\n");
+
+    console.log(message + "\n");
+  });
 
   const abortController = new AbortController();
   context.server = {

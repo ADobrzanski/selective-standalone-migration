@@ -1,13 +1,17 @@
 {
-  "name": "custom-schematics-2",
+  "name": "selective-standalone",
   "private": true,
   "version": "0.0.0",
   "type": "commonjs",
-  "schematics": "./src/collection.json",
+  "schematics": "./collection.json",
   "scripts": {
     "dev": "node ./watch.js",
     "build": "node ./build.js"
   },
+  "files": [
+    "collection.json",
+    "dist"
+  ],
   "dependencies": {
     "@angular-devkit/core": "^18.2.15",
     "@angular-devkit/schematics": "^18.2.15",
@@ -21,6 +25,7 @@
     "@types/node": "^20.14.10",
     "esbuild": "^0.21.5",
     "esbuild-node-externals": "^1.13.1",
+    "esbuild-plugin-copy": "^2.1.1",
     "typescript": "5.4",
     "vite": "^5.3.1"
   }
