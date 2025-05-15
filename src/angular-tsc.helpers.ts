@@ -1,10 +1,6 @@
 import { Reference } from "@angular/compiler-cli/src/ngtsc/imports";
 import { TemplateTypeChecker } from "@angular/compiler-cli/src/ngtsc/typecheck/api/checker";
 import ts from "typescript";
-import { NgElementType } from "./types/ng-element.enum";
-import { NgClass } from "./types/ng-class.type";
-import { extractMetadataLiteral, getImportSpecifier } from "./tsc.helpers";
-import { getAngularDecorators } from "../utils/ng_decorators";
 
 /** Utility to type a class declaration with a name. */
 export type NamedClassDeclaration = ts.ClassDeclaration & {
@@ -117,90 +113,4 @@ export function findTemplateDependencies(
   }
 
   return results;
-}
-
-/**
- * Gets the expressions that should be added to a component's
- * `imports` array based on its template dependencies.
- * @param decl Component class declaration.
- * @param allDeclarations All the declarations that are being converted as a part of this migration.
- * @param tracker
- * @param typeChecker
- * @param importRemapper
- */
-export function getComponentImportExpressions(
-  decl: ts.ClassDeclaration,
-  allDeclarations: Set<ts.ClassDeclaration>,
-  // tracker: ChangeTracker,
-  typeChecker: TemplateTypeChecker,
-  // importRemapper?: ComponentImportsRemapper,
-  // ): ts.Expression[] {
-): PotentialImport[] {
-  const templateDependencies = findTemplateDependencies(decl, typeChecker);
-  const usedDependenciesInMigration = new Set(
-    templateDependencies.filter((dep) => allDeclarations.has(dep.node)),
-  );
-  const seenImports = new Set<string>();
-  const resolvedDependencies: PotentialImport[] = [];
-
-  for (const dep of templateDependencies) {
-    const importLocation = findImportLocation(
-      dep as Reference<NamedClassDeclaration>,
-      decl,
-      usedDependenciesInMigration.has(dep)
-        ? PotentialImportMode.ForceDirect
-        : PotentialImportMode.Normal,
-      typeChecker,
-    );
-
-    if (importLocation && !seenImports.has(importLocation.symbolName)) {
-      seenImports.add(importLocation.symbolName);
-      resolvedDependencies.push(importLocation);
-    }
-  }
-
-  return resolvedDependencies;
-  // return potentialImportsToExpressions(resolvedDependencies, decl, tracker, importRemapper);
-}
-
-const knownNgElementTypes = Object.values(NgElementType) as string[];
-
-/**
- * Finds all classes decorated with any of the angular decorators.
- **/
-export function findNgClasses(
-  sourceFile: ts.SourceFile,
-  typeChecker: ts.TypeChecker,
-): NgClass[] {
-  const ngClasses: NgClass[] = [];
-
-  const fileHasNgElements = knownNgElementTypes.some((element) =>
-    getImportSpecifier(sourceFile, "@angular/core", element),
-  );
-
-  if (!fileHasNgElements) return ngClasses;
-
-  sourceFile.forEachChild(function walk(node) {
-    analyseClass: if (ts.isClassDeclaration(node)) {
-      const ngDecorators = getAngularDecorators(
-        typeChecker,
-        ts.getDecorators(node) || [],
-      ).filter((current) => knownNgElementTypes.includes(current.name));
-
-      if (ngDecorators.length < 1) break analyseClass;
-
-      if (
-        !ngDecorators.some((decorator) =>
-          extractMetadataLiteral(decorator.node),
-        )
-      )
-        break analyseClass;
-
-      ngClasses.push(new NgClass(node));
-    }
-
-    node.forEachChild(walk);
-  });
-
-  return ngClasses;
 }

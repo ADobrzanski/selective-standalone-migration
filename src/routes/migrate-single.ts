@@ -1,11 +1,3 @@
-/*!
- * @license
- * Copyright Google LLC All Rights Reserved.
- *
- * Use of this source code is governed by an MIT-style license that can be
- * found in the LICENSE file at https://angular.dev/license
- */
-
 import {
   type PotentialImport,
   type PotentialImportMode,
@@ -16,8 +8,6 @@ import ts, { Expression, TypeChecker } from "typescript";
 import { XMLParser } from "fast-xml-parser";
 
 import { ChangeTracker, ImportRemapper } from "../../utils/change_tracker";
-import { getAngularDecorators, NgDecorator } from "../../utils/ng_decorators";
-import { closestNode } from "../../utils/typescript/nodes";
 import { ScriptContext, context } from "../main";
 import { NgElementType } from "../types/ng-element.enum";
 import { NamedClassDeclaration } from "../angular-tsc.helpers";
@@ -28,6 +18,7 @@ import { isClassImported } from "./migrate-single/utils";
 import { FastifyInstance, FastifyPluginOptions } from "fastify";
 import { FastifyPluginAsync } from "fastify";
 import { noElementWithId, notOfType } from "./api-responses";
+import { extractMetadataLiteral } from "../tsc.helpers";
 
 /**
  * Function that can be used to prcess the dependencies that
@@ -270,14 +261,6 @@ function getSameModuleDependencies(data: {
   return sameModuleDependencies.map((_) => _.node);
 }
 
-/**
- * Converts all declarations in the specified files to standalone.
- * @param program
- * @param printer
- * @param fileImportRemapper Optional function that can be used to remap file-level imports.
- * @param declarationImportRemapper Optional function that can be used to remap declaration-level
- * imports.
- */
 export function toStandalone(
   sourceFiles: readonly ts.SourceFile[],
   toMigrate: ts.ClassDeclaration[],
@@ -291,32 +274,7 @@ export function toStandalone(
   const tree = context.schematic.tree;
   const templateTypeChecker = program.compiler.getTemplateTypeChecker();
   const typeChecker = program.getTsProgram().getTypeChecker();
-  // const modulesToMigrate = new Set<ts.ClassDeclaration>();
-  // const testObjectsToMigrate = new Set<ts.ObjectLiteralExpression>();
-  // const declarations = new Set<ts.ClassDeclaration>();
   const tracker = new ChangeTracker(printer, fileImportRemapper);
-
-  // for (const sourceFile of sourceFiles) {
-  // const modules = findNgModuleClassesToMigrate(sourceFile, typeChecker);
-  // const testObjects = findTestObjectsToMigrate(sourceFile, typeChecker);
-
-  //   for (const module of modules) {
-  //     const allModuleDeclarations = extractDeclarationsFromModule(module, templateTypeChecker);
-  //     const unbootstrappedDeclarations = filterNonBootstrappedDeclarations(
-  //       allModuleDeclarations,
-  //       module,
-  //       templateTypeChecker,
-  //       typeChecker,
-  //     );
-  //
-  //     if (unbootstrappedDeclarations.length > 0) {
-  //       modulesToMigrate.add(module);
-  //       unbootstrappedDeclarations.forEach((decl) => declarations.add(decl));
-  //     }
-  //   }
-  //
-  //   testObjects.forEach((obj) => testObjectsToMigrate.add(obj));
-  // }
 
   for (const declaration of toMigrate) {
     convertNgModuleDeclarationToStandalone(
@@ -342,20 +300,7 @@ export function toStandalone(
     });
   }
 
-  // for (const node of modulesToMigrate) {
-  //   migrateNgModuleClass(node, declarations, tracker, typeChecker, templateTypeChecker);
-  // }
-  //
-  // migrateTestDeclarations(
-  //   testObjectsToMigrate,
-  //   declarations,
-  //   tracker,
-  //   templateTypeChecker,
-  //   typeChecker,
-  // );
   const pendingChanges = tracker.recordChanges();
-
-  // console.log(pendingChanges);
 
   for (const [file, changes] of pendingChanges.entries()) {
     const update = tree.beginUpdate(relative(process.cwd(), file.fileName));
@@ -1089,42 +1034,6 @@ export function potentialImportsToExpressions(
   });
 }
 
-///**
-// * Moves all of the declarations of a class decorated with `@NgModule` to its imports.
-// * @param node Class being migrated.
-// * @param allDeclarations All the declarations that are being converted as a part of this migration.
-// * @param tracker
-// * @param typeChecker
-// * @param templateTypeChecker
-// */
-//function migrateNgModuleClass(
-//  node: ts.ClassDeclaration,
-//  allDeclarations: Set<ts.ClassDeclaration>,
-//  tracker: ChangeTracker,
-//  typeChecker: ts.TypeChecker,
-//  templateTypeChecker: TemplateTypeChecker,
-//) {
-//  const decorator = templateTypeChecker.getNgModuleMetadata(node)?.decorator;
-//  const metadata = decorator ? extractMetadataLiteral(decorator) : null;
-//
-//  if (metadata) {
-//    moveDeclarationsToImports(
-//      metadata,
-//      allDeclarations,
-//      typeChecker,
-//      templateTypeChecker,
-//      tracker,
-//    );
-//  }
-//}
-
-/**
- * Moves all the symbol references from the `declarations` array to the `imports`
- * array of an `NgModule` class and removes the `declarations`.
- * @param literal Object literal used to configure the module that should be migrated.
- * @param typeChecker
- * @param tracker
- */
 function addImportsToModuleLike(data: {
   import: ts.ClassDeclaration[];
   to: ts.ClassDeclaration;
@@ -1213,15 +1122,6 @@ function markDecoratorAsStandalone(node: ts.Decorator): ts.Decorator {
   const standaloneProp = metadata.properties.find((prop) => {
     return isNamedPropertyAssignment(prop) && prop.name.text === "standalone";
   }) as ts.PropertyAssignment | undefined;
-
-  // In v19 standalone is the default so don't do anything if there's no `standalone`
-  // property or it's initialized to anything other than `false`.
-  // if (
-  //   !standaloneProp ||
-  //   standaloneProp.initializer.kind !== ts.SyntaxKind.FalseKeyword
-  // ) {
-  //   return node;
-  // }
 
   const newProperties = [
     ...metadata.properties.filter((element) => element !== standaloneProp),
@@ -1369,88 +1269,6 @@ export function findImportLocation(
 }
 
 /**
- * Checks whether a node is an `NgModule` metadata element with at least one element.
- * E.g. `declarations: [Foo]` or `declarations: SOME_VAR` would match this description,
- * but not `declarations: []`.
- */
-function hasNgModuleMetadataElements(
-  node: ts.Node,
-): node is ts.PropertyAssignment {
-  return (
-    ts.isPropertyAssignment(node) &&
-    (!ts.isArrayLiteralExpression(node.initializer) ||
-      node.initializer.elements.length > 0)
-  );
-}
-
-///** Finds all modules whose declarations can be migrated. */
-//function findNgModuleClassesToMigrate(
-//  sourceFile: ts.SourceFile,
-//  typeChecker: ts.TypeChecker,
-//) {
-//  const modules: ts.ClassDeclaration[] = [];
-//
-//  if (getImportSpecifier(sourceFile, "@angular/core", "NgModule")) {
-//    sourceFile.forEachChild(function walk(node) {
-//      if (ts.isClassDeclaration(node)) {
-//        const decorator = getAngularDecorators(
-//          typeChecker,
-//          ts.getDecorators(node) || [],
-//        ).find((current) => current.name === "NgModule");
-//        const metadata = decorator
-//          ? extractMetadataLiteral(decorator.node)
-//          : null;
-//
-//        if (metadata) {
-//          const declarations = findLiteralProperty(metadata, "declarations");
-//
-//          if (
-//            declarations != null &&
-//            hasNgModuleMetadataElements(declarations)
-//          ) {
-//            modules.push(node);
-//          }
-//        }
-//      }
-//
-//      node.forEachChild(walk);
-//    });
-//  }
-//
-//  return modules;
-//}
-
-///** Finds all testing object literals that need to be migrated. */
-//function findTestObjectsToMigrate(
-//  sourceFile: ts.SourceFile,
-//  typeChecker: ts.TypeChecker,
-//) {
-//  const testObjects: ts.ObjectLiteralExpression[] = [];
-//  const { testBed, catalyst } = getTestingImports(sourceFile);
-//
-//  if (testBed || catalyst) {
-//    sourceFile.forEachChild(function walk(node) {
-//      if (isTestCall(typeChecker, node, testBed, catalyst)) {
-//        const config = node.arguments[0];
-//        const declarations = findLiteralProperty(config, "declarations");
-//        if (
-//          declarations &&
-//          ts.isPropertyAssignment(declarations) &&
-//          ts.isArrayLiteralExpression(declarations.initializer) &&
-//          declarations.initializer.elements.length > 0
-//        ) {
-//          testObjects.push(config);
-//        }
-//      }
-//
-//      node.forEachChild(walk);
-//    });
-//  }
-//
-//  return testObjects;
-//}
-
-/**
  * Finds the classes corresponding to dependencies used in a component's template.
  * @param decl Component in whose template we're looking for dependencies.
  * @param typeChecker
@@ -1487,297 +1305,6 @@ export function findTemplateDependencies(
   return results;
 }
 
-/**
- * Removes any declarations that are a part of a module's `bootstrap`
- * array from an array of declarations.
- * @param declarations Anaalyzed declarations of the module.
- * @param ngModule Module whote declarations are being filtered.
- * @param templateTypeChecker
- * @param typeChecker
- */
-function filterNonBootstrappedDeclarations(
-  declarations: ts.ClassDeclaration[],
-  ngModule: ts.ClassDeclaration,
-  templateTypeChecker: TemplateTypeChecker,
-  typeChecker: ts.TypeChecker,
-) {
-  const metadata = templateTypeChecker.getNgModuleMetadata(ngModule);
-  const metaLiteral =
-    metadata && metadata.decorator
-      ? extractMetadataLiteral(metadata.decorator)
-      : null;
-  const bootstrapProp = metaLiteral
-    ? findLiteralProperty(metaLiteral, "bootstrap")
-    : null;
-
-  // If there's no `bootstrap`, we can't filter.
-  if (!bootstrapProp) {
-    return declarations;
-  }
-
-  // If we can't analyze the `bootstrap` property, we can't safely determine which
-  // declarations aren't bootstrapped so we assume that all of them are.
-  if (
-    !ts.isPropertyAssignment(bootstrapProp) ||
-    !ts.isArrayLiteralExpression(bootstrapProp.initializer)
-  ) {
-    return [];
-  }
-
-  const bootstrappedClasses = new Set<ts.ClassDeclaration>();
-
-  for (const el of bootstrapProp.initializer.elements) {
-    const referencedClass = ts.isIdentifier(el)
-      ? findClassDeclaration(el, typeChecker)
-      : null;
-
-    // If we can resolve an element to a class, we can filter it out,
-    // otherwise assume that the array isn't static.
-    if (referencedClass) {
-      bootstrappedClasses.add(referencedClass);
-    } else {
-      return [];
-    }
-  }
-
-  return declarations.filter((ref) => !bootstrappedClasses.has(ref));
-}
-
-/**
- * Extracts all classes that are referenced in a module's `declarations` array.
- * @param ngModule Module whose declarations are being extraced.
- * @param templateTypeChecker
- */
-function extractDeclarationsFromModule(
-  ngModule: ts.ClassDeclaration,
-  templateTypeChecker: TemplateTypeChecker,
-): ts.ClassDeclaration[] {
-  const metadata = templateTypeChecker.getNgModuleMetadata(ngModule);
-  return metadata
-    ? (metadata.declarations
-        .filter((decl) => ts.isClassDeclaration(decl.node))
-        .map((decl) => decl.node) as ts.ClassDeclaration[])
-    : [];
-}
-
-///**
-// * Migrates the `declarations` from a unit test file to standalone.
-// * @param testObjects Object literals used to configure the testing modules.
-// * @param declarationsOutsideOfTestFiles Non-testing declarations that are part of this migration.
-// * @param tracker
-// * @param templateTypeChecker
-// * @param typeChecker
-// */
-//export function migrateTestDeclarations(
-//  testObjects: Set<ts.ObjectLiteralExpression>,
-//  declarationsOutsideOfTestFiles: Set<ts.ClassDeclaration>,
-//  tracker: ChangeTracker,
-//  templateTypeChecker: TemplateTypeChecker,
-//  typeChecker: ts.TypeChecker,
-//) {
-//  const { decorators, componentImports } = analyzeTestingModules(
-//    testObjects,
-//    typeChecker,
-//  );
-//  const allDeclarations = new Set(declarationsOutsideOfTestFiles);
-//
-//  for (const decorator of decorators) {
-//    const closestClass = closestNode(decorator.node, ts.isClassDeclaration);
-//
-//    if (decorator.name === "Pipe" || decorator.name === "Directive") {
-//      tracker.replaceNode(
-//        decorator.node,
-//        markDecoratorAsStandalone(decorator.node),
-//      );
-//
-//      if (closestClass) {
-//        allDeclarations.add(closestClass);
-//      }
-//    } else if (decorator.name === "Component") {
-//      const newDecorator = markDecoratorAsStandalone(decorator.node);
-//      const importsToAdd = componentImports.get(decorator.node);
-//
-//      if (closestClass) {
-//        allDeclarations.add(closestClass);
-//      }
-//
-//      if (importsToAdd && importsToAdd.size > 0) {
-//        const hasTrailingComma =
-//          importsToAdd.size > 2 &&
-//          !!extractMetadataLiteral(decorator.node)?.properties.hasTrailingComma;
-//        const importsArray = ts.factory.createNodeArray(
-//          Array.from(importsToAdd),
-//          hasTrailingComma,
-//        );
-//
-//        tracker.replaceNode(
-//          decorator.node,
-//          setPropertyOnAngularDecorator(
-//            newDecorator,
-//            "imports",
-//            ts.factory.createArrayLiteralExpression(importsArray),
-//          ),
-//        );
-//      } else {
-//        tracker.replaceNode(decorator.node, newDecorator);
-//      }
-//    }
-//  }
-//
-//  for (const obj of testObjects) {
-//    moveDeclarationsToImports(
-//      obj,
-//      allDeclarations,
-//      typeChecker,
-//      templateTypeChecker,
-//      tracker,
-//    );
-//  }
-//}
-
-/**
- * Analyzes a set of objects used to configure testing modules and returns the AST
- * nodes that need to be migrated and the imports that should be added to the imports
- * of any declared components.
- * @param testObjects Object literals that should be analyzed.
- */
-function analyzeTestingModules(
-  testObjects: Set<ts.ObjectLiteralExpression>,
-  typeChecker: ts.TypeChecker,
-) {
-  const seenDeclarations = new Set<ts.Declaration>();
-  const decorators: NgDecorator[] = [];
-  const componentImports = new Map<ts.Decorator, Set<ts.Expression>>();
-
-  for (const obj of testObjects) {
-    const declarations = extractDeclarationsFromTestObject(obj, typeChecker);
-
-    if (declarations.length === 0) {
-      continue;
-    }
-
-    const importsProp = findLiteralProperty(obj, "imports");
-    const importElements =
-      importsProp &&
-      hasNgModuleMetadataElements(importsProp) &&
-      ts.isArrayLiteralExpression(importsProp.initializer)
-        ? importsProp.initializer.elements.filter((el) => {
-            // Filter out calls since they may be a `ModuleWithProviders`.
-            return (
-              !ts.isCallExpression(el) &&
-              // Also filter out the animations modules since they throw errors if they're imported
-              // multiple times and it's common for apps to use the `NoopAnimationsModule` to
-              // disable animations in screenshot tests.
-              !isClassReferenceInAngularModule(
-                el,
-                /^BrowserAnimationsModule|NoopAnimationsModule$/,
-                "platform-browser/animations",
-                typeChecker,
-              )
-            );
-          })
-        : null;
-
-    for (const decl of declarations) {
-      if (seenDeclarations.has(decl)) {
-        continue;
-      }
-
-      const [decorator] = getAngularDecorators(
-        typeChecker,
-        ts.getDecorators(decl) || [],
-      );
-
-      if (decorator) {
-        seenDeclarations.add(decl);
-        decorators.push(decorator);
-
-        if (decorator.name === "Component" && importElements) {
-          // We try to de-duplicate the imports being added to a component, because it may be
-          // declared in different testing modules with a different set of imports.
-          let imports = componentImports.get(decorator.node);
-          if (!imports) {
-            imports = new Set();
-            componentImports.set(decorator.node, imports);
-          }
-          importElements.forEach((imp) => imports!.add(imp));
-        }
-      }
-    }
-  }
-
-  return { decorators, componentImports };
-}
-
-/**
- * Finds the class declarations that are being referred
- * to in the `declarations` of an object literal.
- * @param obj Object literal that may contain the declarations.
- * @param typeChecker
- */
-function extractDeclarationsFromTestObject(
-  obj: ts.ObjectLiteralExpression,
-  typeChecker: ts.TypeChecker,
-): ts.ClassDeclaration[] {
-  const results: ts.ClassDeclaration[] = [];
-  const declarations = findLiteralProperty(obj, "declarations");
-
-  if (
-    declarations &&
-    hasNgModuleMetadataElements(declarations) &&
-    ts.isArrayLiteralExpression(declarations.initializer)
-  ) {
-    for (const element of declarations.initializer.elements) {
-      const declaration = findClassDeclaration(element, typeChecker);
-
-      // Note that we only migrate classes that are in the same file as the testing module,
-      // because external fixture components are somewhat rare and handling them is going
-      // to involve a lot of assumptions that are likely to be incorrect.
-      if (
-        declaration &&
-        declaration.getSourceFile().fileName === obj.getSourceFile().fileName
-      ) {
-        results.push(declaration);
-      }
-    }
-  }
-
-  return results;
-}
-
-/** Extracts the metadata object literal from an Angular decorator. */
-function extractMetadataLiteral(
-  decorator: ts.Decorator,
-): ts.ObjectLiteralExpression | null {
-  // `arguments[0]` is the metadata object literal.
-  return ts.isCallExpression(decorator.expression) &&
-    decorator.expression.arguments.length === 1 &&
-    ts.isObjectLiteralExpression(decorator.expression.arguments[0])
-    ? decorator.expression.arguments[0]
-    : null;
-}
-
-/**
- * Checks whether a class is a standalone declaration.
- * @param node Class being checked.
- * @param declarationsInMigration Classes that are being converted to standalone in this migration.
- * @param templateTypeChecker
- */
-function isStandaloneDeclaration(
-  node: ts.ClassDeclaration,
-  declarationsInMigration: Set<ts.ClassDeclaration>,
-  templateTypeChecker: TemplateTypeChecker,
-): boolean {
-  if (declarationsInMigration.has(node)) {
-    return true;
-  }
-
-  const metadata =
-    templateTypeChecker.getDirectiveMetadata(node) ||
-    templateTypeChecker.getPipeMetadata(node);
-  return metadata != null && metadata.isStandalone;
-}
-
 /** Finds a property with a specific name in an object literal expression. */
 function findLiteralProperty(
   literal: ts.ObjectLiteralExpression,
@@ -1787,71 +1314,4 @@ function findLiteralProperty(
     (prop) =>
       prop.name && ts.isIdentifier(prop.name) && prop.name.text === name,
   );
-}
-
-/**
- * Finds the class declaration that is being referred to by a node.
- * @param reference Node referring to a class declaration.
- * @param typeChecker
- */
-export function findClassDeclaration(
-  reference: ts.Node,
-  typeChecker: ts.TypeChecker,
-): ts.ClassDeclaration | null {
-  return (
-    typeChecker
-      .getTypeAtLocation(reference)
-      .getSymbol()
-      ?.declarations?.find(ts.isClassDeclaration) || null
-  );
-}
-
-/**
- * Checks whether a node is referring to a specific class declaration.
- * @param node Node that is being checked.
- * @param className Name of the class that the node might be referring to.
- * @param moduleName Name of the Angular module that should contain the class.
- * @param typeChecker
- */
-export function isClassReferenceInAngularModule(
-  node: ts.Node,
-  className: string | RegExp,
-  moduleName: string,
-  typeChecker: ts.TypeChecker,
-): boolean {
-  const symbol = typeChecker.getTypeAtLocation(node).getSymbol();
-  const externalName = `@angular/${moduleName}`;
-  const internalName = `angular2/rc/packages/${moduleName}`;
-
-  return !!symbol?.declarations?.some((decl) => {
-    const closestClass = closestOrSelf(decl, ts.isClassDeclaration);
-    const closestClassFileName = closestClass?.getSourceFile().fileName;
-
-    if (
-      !closestClass ||
-      !closestClassFileName ||
-      !closestClass.name ||
-      !ts.isIdentifier(closestClass.name) ||
-      (!closestClassFileName.includes(externalName) &&
-        !closestClassFileName.includes(internalName))
-    ) {
-      return false;
-    }
-
-    return typeof className === "string"
-      ? closestClass.name.text === className
-      : className.test(closestClass.name.text);
-  });
-}
-
-/**
- * Gets the closest node that matches a predicate, including the node that the search started from.
- * @param node Node from which to start the search.
- * @param predicate Predicate that the result needs to pass.
- */
-export function closestOrSelf<T extends ts.Node>(
-  node: ts.Node,
-  predicate: (n: ts.Node) => n is T,
-): T | null {
-  return predicate(node) ? node : closestNode(node, predicate);
 }

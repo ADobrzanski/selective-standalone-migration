@@ -27,22 +27,15 @@ import {
   toStandaloneRoute,
 } from "./routes/migrate-single";
 
-export type FsTreeNode = { [pahtSegment: string]: FsTreeNode | ts.SourceFile };
-
 export type ScriptContext = {
   program: NgtscProgram;
   basePath: string;
-  schematic: {
-    tree: Tree;
-  };
+  schematic: { tree: Tree };
   checker: {
     ts: ts.TypeChecker;
     ng: TemplateTypeChecker;
   };
-  source: {
-    tree: FsTreeNode;
-    files: readonly ts.SourceFile[];
-  };
+  source: { files: readonly ts.SourceFile[] };
   elements: {
     cls: ts.ClassDeclaration;
     type: NgElementType;
@@ -113,15 +106,13 @@ async function analyseDependencies(data) {
     .getTsProgram()
     .getSourceFiles();
 
-  const fileTree: FsTreeNode = makeFileTree(sourceFiles);
-
   const elements = sourceFiles.flatMap((file) =>
     findNgClasses(file, tsChecker),
   );
 
   context.program = program;
   context.schematic = { tree: data.tree };
-  context.source = { files: sourceFiles, tree: fileTree };
+  context.source = { files: sourceFiles };
   context.checker = { ts: tsChecker, ng: templateTypeChecker };
   context.elements = elements;
 
@@ -283,33 +274,6 @@ async function selectBlockersResolution(data: {
   );
 
   return resolution;
-}
-
-function makeFileTree(sourceFiles: readonly ts.SourceFile[]) {
-  const fileTree = {};
-
-  sourceFiles
-    .filter((file) => !file.fileName.includes("node_modules"))
-    .forEach((file) => {
-      const pathSegments = file.fileName.split("/").filter((_) => _);
-      let currentFolder = fileTree;
-
-      pathSegments.forEach((segment) => {
-        // if is file
-        if (segment.includes(".")) {
-          currentFolder[segment] = file;
-        }
-
-        // if is folder and not created yet
-        if (!currentFolder[segment]) {
-          currentFolder[segment] = {};
-        }
-
-        currentFolder = currentFolder[segment];
-      });
-    });
-
-  return fileTree;
 }
 
 const ngElements = Object.values(NgElementType) as string[];
