@@ -126,9 +126,8 @@
       };
 
       deps.forEach((d) => {
-        if (d.id === -1) {
-          d.id = randomId();
-        }
+        d.elementId = d.id;
+        d.id = randomId();
 
         if (d.declaredIn) {
           d.parentId = `${root.id}-${d.declaredIn.id}`;
@@ -155,7 +154,7 @@
     async function expandDependencyTree(event, data) {
       try {
         const depsResponse = await fetch(
-          `/api/component/${event.id}/dependency`,
+          `/api/component/${event.elementId}/dependency`,
         );
         const responseData = await depsResponse.json();
 
