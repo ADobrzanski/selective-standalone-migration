@@ -7,7 +7,7 @@ import {
 import ts, { Expression, TypeChecker } from "typescript";
 import { XMLParser } from "fast-xml-parser";
 
-import { ChangeTracker, ImportRemapper } from "../../utils/change_tracker";
+import { ChangeTracker, ImportRemapper } from "../utils/change_tracker";
 import { ScriptContext, context } from "../main";
 import { NgElementType } from "../types/ng-element.enum";
 import { NamedClassDeclaration } from "../angular-tsc.helpers";
